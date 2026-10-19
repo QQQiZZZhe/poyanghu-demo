@@ -1,0 +1,9452 @@
+extends Node
+
+const Motion = preload("res://scripts/motion.gd")
+const MotionWeb = preload("res://scripts/motion_web.gd")
+const MotionSpring = preload("res://scripts/motion_spring.gd")
+const MotionScroll = preload("res://scripts/motion_scroll.gd")
+const PolicyStampSelector = preload("res://scripts/policy_stamp_selector.gd")
+const UiSkin := preload("res://scripts/ui_skin.gd")
+const CardFlight = preload("res://scripts/card_flight.gd")
+
+const VisualTheme = preload("res://scripts/visual_theme.gd")
+const PixelCardArt = preload("res://scripts/pixel_card_art.gd")
+const PixelWetland = preload("res://scripts/pixel_wetland.gd")
+var wetland: Control
+var card_art_preview: CanvasLayer
+
+func _open_card_art_preview() -> void:
+	if is_instance_valid(card_art_preview):
+		return
+	card_art_preview = preload("res://scripts/card_art_preview.gd").new()
+	add_child(card_art_preview)
+## 《拯救鄱阳湖》主场景：2.5D 沙盘 + 四区 UI。逻辑在 GameState 单例。
+
+const METRIC_COLORS := {
+	"water_level": Color(0.30, 0.58, 0.95),
+	"vegetation": Color(0.40, 0.76, 0.38),
+	"water_quality": Color(0.30, 0.80, 0.80),
+	"fish": Color(0.40, 0.50, 0.88),
+	"birds": Color(0.88, 0.88, 0.92),
+	"community": Color(0.96, 0.68, 0.32),
+}
+const CATEGORY_NAMES := {"ecology": "生态", "social": "社会", "manage": "管理"}
+const CATEGORY_COLORS := {
+	"ecology": Color(0.42, 0.75, 0.46),
+	"social": Color(0.95, 0.70, 0.36),
+	"manage": Color(0.56, 0.66, 0.90),
+}
+const SEASONS := ["春", "夏", "秋", "冬"]
+const CATEGORY_ORDER := ["ecology", "social", "manage"]
+
+## 知识卡图鉴（主页入口）用的类别配色。
+## 与行动卡的三色（生态/社会/管理）分开：知识卡是「科普条目」的口吻，
+## 类别更多（植物/鸟类/机制/外来物种/案例/管理策略），各给一个自己的颜色。
+const KNOWLEDGE_CATEGORY_COLORS := {
+	"植物": Color(0.42, 0.72, 0.45),
+	"鸟类": Color(0.44, 0.62, 0.86),
+	"机制": Color(0.62, 0.50, 0.82),
+	"外来物种": Color(0.82, 0.52, 0.32),
+	"案例": Color(0.80, 0.42, 0.46),
+	"管理策略": Color(0.36, 0.70, 0.68),
+	"地理": Color(0.34, 0.65, 0.78),
+	"水生动物": Color(0.38, 0.60, 0.73),
+	"保护行动": Color(0.65, 0.72, 0.36),
+}
+## 未收集时的灰调（卡面 / 详情共用，改一处就整体变灰深浅）
+const KNOWLEDGE_LOCKED_INK := Color(0.55, 0.58, 0.58)
+## 知识卡没有自己的插图，从行动卡图集（conservation-cards，3 列 × 2 行）里挑一格 ——
+## 图鉴与牌库于是是同一套视觉语言。**显式指定 (列, 行)**，不走 id hash：
+## hash 挑图会把「苦草」配上鸟图，看着就不对。
+## 共用六格主题场景图，不作为各物种的识别图。
+const KNOWLEDGE_ART_TILE := {
+	"plant_kucao": Vector2i(0, 1),          # 荷花池 + 鱼：沉水植物
+	"bird_baihe": Vector2i(0, 0),           # 白鹤站在芦苇里
+	"bird_xiaotiane": Vector2i(2, 1),       # 观鸟塔 + 飞鸟群
+	"bird_dongfang": Vector2i(0, 0),        # 大型涉禽（与白鹤同图）
+	"mech_water_quality": Vector2i(2, 0),   # 研究笔记 + 放大镜
+	"mech_fushouluo": Vector2i(1, 1),       # 农田劳作：防控现场
+	"cons_disease": Vector2i(0, 1),         # 水草塘：病害发生地（与苦草同图）
+	"cons_compensate": Vector2i(1, 0),      # 水乡村庄：社区共管
+	"geo_poyang": Vector2i(0, 1),
+	"geo_five_rivers": Vector2i(0, 1),
+	"geo_hukou": Vector2i(0, 1),
+	"geo_seasonal_lake": Vector2i(0, 1),
+	"geo_saucer_lakes": Vector2i(0, 1),
+	"geo_flood_storage": Vector2i(0, 1),
+	"animal_finless_porpoise": Vector2i(0, 1),
+	"bird_white_naped_crane": Vector2i(2, 1),
+	"bird_wintering_geese": Vector2i(2, 1),
+	"plant_sedge": Vector2i(0, 0),
+	"plant_reeds": Vector2i(0, 0),
+	"plant_lotus": Vector2i(0, 1),
+	"mech_fish_migration": Vector2i(0, 1),
+	"mech_vegetation_zones": Vector2i(0, 1),
+	"mech_food_web": Vector2i(0, 0),
+	"mech_feeding_depth": Vector2i(0, 0),
+	"case_extreme_drought": Vector2i(2, 0),
+	"mech_micro_wetlands": Vector2i(0, 1),
+	"mech_wetland_carbon": Vector2i(2, 0),
+	"mech_runoff_pollution": Vector2i(1, 1),
+	"manage_flyway": Vector2i(2, 1),
+	"mech_bird_rings": Vector2i(2, 0),
+	"manage_bird_surveys": Vector2i(2, 1),
+	"manage_fishing_ban": Vector2i(0, 1),
+	"protect_scientific_release": Vector2i(0, 1),
+	"manage_bird_canteens": Vector2i(1, 1),
+	"protect_birdwatching": Vector2i(2, 1),
+	"protect_bird_rescue": Vector2i(2, 0),
+	"protect_wetland_tracks": Vector2i(0, 0),
+	"case_entanglement": Vector2i(2, 0),
+	"manage_fisher_transition": Vector2i(1, 0),
+	"mech_underwater_noise": Vector2i(2, 0),
+}
+## 主页「知识卡」按钮的像素图标（一张卡片：外框 + 两条文字线）
+const KNOWLEDGE_ICON_GRID := """..########..
+.#XXXXXXXX#.
+.#XXXXXXXX#.
+.#X######X#.
+.#XXXXXXXX#.
+.#XXXXXXXX#.
+.#X######X#.
+.#XXXXXXXX#.
+.#XXXXXXXX#.
+.#X####XXX#.
+.#XXXXXXXX#.
+..########.."""
+## 未收集卡面上那个大「？」（12×12 像素网格；每行长度必须一致，见 _grid_image）
+const KNOWLEDGE_QUESTION_GRID := """..######....
+.#XXXXXX#...
+.#XX##XX#...
+.#XX..XX#...
+......XX#...
+.....XX#....
+....XX#.....
+....XX#.....
+....XX#.....
+............
+....XX#.....
+....XX#....."""
+
+## 季节指针：左上角的小表盘，指针随回合在四季之间转 90°（春在 12 点、顺时针转）。
+## 全工程唯一的自绘控件（_draw）—— 它纯是指示器，不接受任何输入。
+## 美术给的三个 32px 像素图标（已裁到内容边缘）：金币 / 金币被消耗 / 科研点。
+## 按素材原像素 1:1 显示（最近邻），不拉伸、不染色。
+## 生态监测六项指标的小图标：美术按 8×8 像素重画后交付，替换掉原来代码现绘的网格。
+## 键与 GameState.METRIC_NAMES / METRIC_COLORS 一致。
+const METRIC_ICONS := {
+	"water_level": preload("res://assets/ui/ui-metric-water_level.png"),
+	"vegetation": preload("res://assets/ui/ui-metric-vegetation.png"),
+	"water_quality": preload("res://assets/ui/ui-metric-water_quality.png"),
+	"fish": preload("res://assets/ui/ui-metric-fish.png"),
+	"birds": preload("res://assets/ui/ui-metric-birds.png"),
+	"community": preload("res://assets/ui/ui-metric-community.png"),
+}
+const ICON_COIN := preload("res://assets/ui/ui-icon-coin.png")
+const ICON_COIN_SPENT := preload("res://assets/ui/ui-icon-coin-spent.png")
+const ICON_RESEARCH := preload("res://assets/ui/ui-icon-research.png")
+
+
+class SeasonDial extends Control:
+	const RAD := 20.0
+	## 16bit 像素表盘配色：奶白盘面 + 棕黄外框 + 黄色指针（面板是深蓝底，对比正好）
+	const FACE := Color("fffde7")        # 盘面：奶白
+	const INNER := Color("e2cb95")       # 盘面与外框之间的过渡圈
+	const FRAME := Color("8a6a2e")       # 外框：棕黄
+	const FRAME_LIT := Color("b18b3f")   # 外框左上受光面（16bit 立体感）
+	const FRAME_DARK := Color("5e4620")  # 外框右下暗面
+	const TICK := Color("6b4e1f")        # 四季刻度
+	const HAND := Color("e8b026")        # 指针：黄
+	var _angle: float = -PI * 0.5    # 指针角度（弧度）：-90° = 12 点钟方向 = 春
+	var _face: Texture2D = null      # 盘面烘焙贴图（只做一次）
+	## 盘内不写字 —— 面板只有 204px 宽，季节名放在盘右边的 Label 里（见 _build_ui）。
+	## 四个刻度点就是春/夏/秋/冬：12 点、3 点、6 点、9 点。
+
+	func _init() -> void:
+		custom_minimum_size = Vector2(RAD * 2.0 + 6.0, RAD * 2.0 + 6.0)
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_face = _bake_face()
+		# 像素图要按最近邻采样，缩放时才不会被抹成糊的
+		texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+
+	## 盘面一次性烘焙成贴图：逐像素画圆（奶白盘面 / 棕黄外框 / 四季刻度），
+	## 之后每帧只重画指针 —— 开销和原来的 draw_circle 版本一样小，
+	## 但边缘是真正的方块像素，不会被引擎的圆弧平滑成圆的。
+	func _bake_face() -> Texture2D:
+		var span := int(RAD * 2.0) + 4
+		var img := Image.create(span, span, false, Image.FORMAT_RGBA8)
+		img.fill(Color(0, 0, 0, 0))
+		var o := Vector2(span * 0.5, span * 0.5)
+		for y in span:
+			for x in span:
+				var d := Vector2(float(x) + 0.5, float(y) + 0.5).distance_to(o)
+				var c := Color(0, 0, 0, 0)
+				if d <= 13.0:
+					c = FACE
+				elif d <= 15.0:
+					c = INNER
+				elif d <= 20.0:
+					c = FRAME
+					var lit := (float(x) - o.x) + (float(y) - o.y)
+					if lit < -6.0:
+						c = FRAME_LIT
+					elif lit > 6.0:
+						c = FRAME_DARK
+				if c.a > 0.0:
+					img.set_pixel(x, y, c)
+		# 四季刻度：12 / 3 / 6 / 9 点方向各一块 2×2 像素
+		for i in 4:
+			var a: float = -PI * 0.5 + float(i) * PI * 0.5
+			# r=11 落在奶白盘面上，刻度才看得清（16 会掉进棕黄框里，暗色贴暗色就糊了）
+			var t := o + Vector2(cos(a), sin(a)) * 11.0
+			for dy in 2:
+				for dx in 2:
+					img.set_pixel(int(t.x) - 1 + dx, int(t.y) - 1 + dy, TICK)
+		return ImageTexture.create_from_image(img)
+
+	## 转到第 index 季（0 春 / 1 夏 / 2 秋 / 3 冬）。animate=false 直接落位（读档/重开用）。
+	func turn_to(index: int, animate: bool = true) -> void:
+		var target: float = -PI * 0.5 + float(index) * PI * 0.5
+		if not animate or preload("res://scripts/motion_web.gd").reduced(self):
+			preload("res://scripts/motion_spring.gd").stop(self, "_angle")
+			_angle = target
+			queue_redraw()
+			return
+		preload("res://scripts/motion_spring.gd").to(self, "_angle", target, 200.0, 22.0)
+
+	func _set_angle(a: float) -> void:
+		_angle = a
+		queue_redraw()
+
+	func _draw() -> void:
+		var c: Vector2 = size * 0.5
+		if _face != null:
+			draw_texture(_face, c - Vector2(_face.get_width(), _face.get_height()) * 0.5)
+		# string-clock: the flexible stroke yields, its data endpoint stays exact.
+		# 指针仍是同一条贝塞尔曲线（弹簧速度决定弯曲），只是改用像素方块来画。
+		var direction := Vector2.from_angle(_angle)
+		var tip := c + direction * (RAD - 2.0)
+		var driver := get_node_or_null("MotionSpring__angle")
+		var velocity := float(driver.velocity) if driver else 0.0
+		var middle := c.lerp(tip, 0.5) + direction.orthogonal() * clampf(velocity * 0.18, -2.0, 2.0)
+		for i in range(1, 9):
+			var t := float(i) / 8.0
+			var p: Vector2 = c * (1.0 - t) * (1.0 - t) + middle * 2.0 * t * (1.0 - t) + tip * t * t
+			draw_rect(Rect2((p - Vector2(1.0, 1.0)).round(), Vector2(2, 2)), HAND)
+		draw_rect(Rect2((tip - Vector2(1.5, 1.5)).round(), Vector2(3, 3)), HAND)
+		draw_rect(Rect2((c - Vector2(2.0, 2.0)).round(), Vector2(4, 4)), HAND)
+		draw_rect(Rect2((c - Vector2(1.0, 1.0)).round(), Vector2(2, 2)), FRAME)
+
+## Permanent study and seeded random talents coexist; allocations start next run.
+const TALENT_TREE_ENABLED := true
+const TalentTreePanel := preload("res://scripts/talent_tree_panel.gd")
+## 开始页右上角的照片条（可左右切换 / 点图放大看原图并标出处）
+const TitlePhotoCarousel := preload("res://scripts/title_photo_carousel.gd")
+
+# 成就图标配色：解锁 = 金牌，未解锁 = 灰牌（同一个网格，只换颜色）
+const ACH_GOLD := Color(0.98, 0.80, 0.30)
+const ACH_LOCKED := Color(0.42, 0.42, 0.47)
+# 成就图标的外框宽度（高度取调用处的 px）。四张美术图裁掉透明留白后宽高比各不相同
+# （42~53px 宽），不统一列宽的话，右边的成就名字会一行一个起点 —— 看着就是「错位」。
+const ACH_ICON_BOX_WIDTH := 56.0
+# 主菜单「成就」「知识卡」入口的小图标（美术交付，100×100 带透明留白）。
+# 与成就页那四张同一套处理：裁掉透明留白 + 等比缩放，不再用像素网格现画。
+const MENU_ACHIEVEMENTS_ICON := preload("res://assets/ui/menu-achievements.png")
+const MENU_KNOWLEDGE_ICON := preload("res://assets/ui/menu-knowledge.png")
+# 美术交付的成就图标（Achievements.LIST 里带 tex 的那几条）有自己的一整套配色，
+# 不能像像素网格那样换主色重染。未解锁的版本是运行时算出来的灰牌（见
+# _achievement_art_locked）：去色 + 压暗，保住「已解锁=金、未解锁=灰」这个原设计。
+# 两个缓存都以原纹理为 key，第一次算完就不再重算。
+var _ach_art_trimmed: Dictionary = {}
+var _ach_art_grey: Dictionary = {}
+# 苦力怕彩蛋（左上角草地，lake_view 局部坐标）
+const CREEPER_X := -45.0
+const CREEPER_Z := 4.0
+const CREEPER_SIZE := 12.0   # 贴图宽度（高度按图片宽高比自动算）
+const CREEPER_CHANCE := 0.1  # 进入主菜单时出现的概率
+var creeper_mesh: MeshInstance3D = null
+
+# UI 节点
+var left_panel: PanelContainer
+var turn_label: Label
+## 左上「资金 / 回合」栏最下面的「本局天赋」常驻区（0.0.8）。
+## 词条每局开局随机，所以这里只建容器、内容由 _refresh_run_talents() 按需重画。
+var talents_row: VBoxContainer
+var _talents_sig: String = ""      # 已画出的词条签名，内容没变就不重建节点
+var season_label: Label
+var season_tagline: Label
+var season_dial: SeasonDial
+var dispatch_btn: Button          # 紧急调度：花 40 万点名一张当季牌
+var refresh_btn: Button           # 刷新手牌：花 5 万重抽整手，每回合限一次
+var funds_icon: TextureRect       # 资金栏金币图标：与六项指标同款的悬停/点击反馈
+var research_icon: TextureRect    # 科研点图标：同上（科研点提示也挂在它和标签上）
+var dispatch_panel: Control       # 紧急调度的选牌面板（与牌库同款的全屏卡牌网格）
+var dispatch_grid: HFlowContainer
+var dispatch_scroll: ScrollContainer
+var dispatch_hint: Label          # 面板顶部说明（含当前调度费，逐次递增所以要重写）
+var _refresh_used_turn: int = -1  # 本回合是否已刷过手牌（-1 = 没刷过）
+var _season_dial_index: int = -1  # 指针当前停在第几季，避免 _update_hud 每帧重触发动画
+var funds_label: Label
+var spent_label: Label
+var research_label: Label
+var event_label: Label
+var right_panel: PanelContainer
+var metric_bars: Dictionary = {}
+var _metric_preview_dirty := true
+var _metric_preview_values: Dictionary = {}
+var _metric_preview_clock := 0.0
+# 指标悬停小窗（跟随鼠标：本回合会掉多少 / 红线在哪）
+var metric_tip: PanelContainer = null
+var metric_tip_title: Label = null
+var metric_tip_body: RichTextLabel = null
+var _tip_metric: String = ""       # 当前小窗显示的是哪一项（"" = 没显示）
+var _tip_last_text: String = ""    # 上次写入的正文，内容没变就不重复塞（省得每帧重排版）
+var hand_panel: PanelContainer
+var sandpan_view: Node
+var end_turn_btn: Button
+var bottom_right: VBoxContainer
+var card_box: Control
+var selected_label: Label
+var drag_play_hint: Label = null
+var staged_board: NinePatchRect
+var staged_board_count: Label
+var action_hint: Label         # 已移除常驻提示，保留隐藏节点供旧测试兼容
+var current_hand: Array = []   # 当前手牌（card dict 数组）
+var card_infos: Array = []     # {panel, card_id, base_pos, theta, radial, selected, tier, cost_label}
+var _fan_layout_size: Vector2 = Vector2.ZERO  # 上次布局时的容器尺寸
+var _card_press_panel: PanelContainer = null
+var _card_press_elapsed := 0.0
+var _card_press_origin := Vector2.ZERO
+var _card_dragging := false
+var _card_drag_index := -1
+var _card_drag_mouse := Vector2.ZERO
+var _card_drag_last_mouse := Vector2.ZERO
+var _card_drag_grab_offset := Vector2.ZERO
+var _card_drag_grab_point := Vector2.ZERO
+var _card_drag_scale_velocity := 0.0
+var _card_drag_rotation_velocity := 0.0
+var _card_drag_lean := 0.0
+const CARD_DRAG_HOLD_SEC := 0.14
+const CARD_DRAG_THRESHOLD := 7.0
+const CARD_PLAY_SWIPE := 24.0
+const CARD_UNDO_SWIPE := 34.0
+const STAGED_PREVIEW_SEC := 1.0
+const BOARD_CARD_SCALE := 0.50
+const BOARD_CARD_SPACING := 63.0
+const BOARD_CAPACITY := 5
+var play_deal_anim: bool = false              # 下次布局时播放发牌入场动画
+## 政策力度卷轴：点击基础、有效或深度盖章。已选牌保留选定时的档位。
+var tier_lever: PanelContainer
+var lever_track: Control
+var lever_handle: Control
+var lever_cd_label: Label              # 「出牌档位」右边的冷却倒计时
+var lever_slot_btns: Array = []
+var lever_state_label: Label
+var play_tier: String = "effective"           # 拉杆当前档位（新的一局复位成有效档）
+var popup_root: Control
+var dim: ColorRect
+var popup_center: CenterContainer
+var popup_panel: PanelContainer
+var _knowledge_egg_reveal: Control
+var _knowledge_popup_card_id := ""
+var popup_content: BoxContainer
+var popup_photo_frame: PanelContainer
+var popup_photo: TextureRect
+var popup_title: Label
+var popup_body: RichTextLabel
+var popup_button: Button
+var _popup_continue: Callable = Callable()
+var _popup_reveal: Tween
+var _current_event: String = ""
+# 顶部横幅的临时覆盖（只有危机弹层会写它：危机预警/爆发时横幅必须让位给危机）。
+# 空串 = 横幅显示 GameState 现场生成的态势简报（见 _refresh_event_banner）。
+# ⚠ 与 _current_event 分开：后者是「第 N 回合 · 事件」弹窗的正文，不能被危机文案顶掉。
+var _banner_override: String = ""
+
+# 主菜单
+var menu_root: Control
+var title_photos: TitlePhotoCarousel    # 右上角照片条（跟着 menu_col 显隐）
+var menu_utilities: GridContainer
+var menu_separator: HSeparator
+var menu_col: VBoxContainer            # 左下角选项列
+var menu_start_btn: Button
+var menu_easy_btn: Button
+var menu_normal_btn: Button
+var menu_hard_btn: Button
+var menu_nightmare_btn: Button
+var menu_back_btn: Button
+var menu_seed_start_btn: Button
+var menu_talent_btn: Button
+var menu_settings_btn: Button
+var menu_credits_btn: Button
+var menu_achievements_btn: Button
+var menu_knowledge_btn: Button
+var menu_quit_btn: Button
+var _info_back_to_settings: bool = false   # 制作人员是从设置里点进去的 → 返回时回设置而不是主菜单
+var menu_seed_label: Label
+var menu_mode_label: Label
+var seed_input: LineEdit
+var menu_hint: Label
+var menu_talent_panel: PanelContainer
+var menu_settings_panel: PanelContainer
+var menu_credits_panel: PanelContainer
+var menu_achievements_panel: PanelContainer
+var menu_clear_save_btn: Button
+var menu_clear_confirm_panel: PanelContainer
+var clear_status_label: Label
+
+# 音频 / BGM
+var bgm_player: AudioStreamPlayer
+var bgm_index: int = 0
+var _bgm_danger: bool = false
+const BGM_RISK_THRESHOLD_OFFSET := -3 # 音频临界线比生态红线低 3 点，减少轻微风险时切曲。
+var _bgm_streams: Array[AudioStream] = []
+var _bgm_recovery_tween: Tween
+var _bgm_risk_key: Array = []
+var _bgm_risk: bool = false
+var bgm_volume: float = 0.8
+## 0% 必须是真的没声音。linear_to_db(0) 是 -inf，从前用 maxf(v, 0.001) 兜底，
+## 结果 0% 时播放器还停在 -60 dB —— 安静段落里 BGM 依然听得见（0.2.9 的 bug）。
+const SILENT_VOLUME_DB := -80.0
+## 结算动画速度倍率（1.0 = 正常）。玩家可在设置里调 —— 手感因人而异，
+## 与其每次改代码重导，不如给个滑块。与音量一起存在 user://settings.json。
+var score_speed: float = 1.0
+const SCORE_SPEED_MIN := 0.5
+const SCORE_SPEED_MAX := 3.0
+var audio_volume_slider: HSlider
+var audio_volume_label: Label
+var score_speed_slider: HSlider
+var score_speed_label: Label
+var bgm_switch_btn: Button
+var pause_settings_panel: PanelContainer
+var pause_volume_slider: HSlider
+var pause_volume_label: Label
+var pause_bgm_btn: Button
+var pause_score_speed_slider: HSlider
+var pause_score_speed_label: Label
+const BGM_PATHS := ["res://assets/audio/theme.mp3", "res://assets/audio/poyanghudanger.mp3"]
+const BGM_NAMES := ["theme", "危机"]
+const BGM_RECOVERY_SPEED := 0.75
+const BGM_RECOVERY_SECONDS := 3.0
+const AUDIO_SETTINGS_PATH := "user://settings.json"
+
+# 结算音效由 tools/make_ding.py 生成；发牌录音与许可记录见 licenses。
+const SFX_PATHS := {
+	"ding": "res://assets/audio/ding.wav",   # 逐张弹分 / 指标结算的「叮」
+	"land": "res://assets/audio/land.wav",   # 甩牌落桌的闷响
+	"deal": "res://assets/audio/card-dealing-zapsplat.mp3",
+	"stamp": "res://assets/audio/policy-stamp-sonilo.wav",
+}
+const SFX_POOL_SIZE := 6        # 复音池：支撑每 0.045s 一个叮而互不打断
+const DEAL_SFX_DB := -5.0
+const DEAL_SFX_DURATION_RATIO := 0.75
+const DEAL_SFX_FULL_HAND := 7 # 普通满手牌；额外抽牌不再延长音效。
+const INITIAL_DEAL_DURATION := 0.36
+const INITIAL_DEAL_STAGGER := 0.06
+var _deal_sfx_player: AudioStreamPlayer
+var _deal_sfx_turn := -1
+var _sfx_players: Array = []
+var _sfx_streams: Dictionary = {}
+var _sfx_cursor: int = 0        # 轮转下标（比"找空闲播放器"简单，且一定不会切掉正在响的那个）
+var menu_camera_far: bool = false      # 开始页期间镜头拉远看全景
+var menu_continue_btn: Button
+
+# 暂停 / 存档
+var pause_root: Control
+var pause_panel: PanelContainer
+var pause_hint: Label
+var _paused: bool = false
+var _playing: bool = false
+var _current_phase: String = "allocate"
+var _defer_game_over: bool = false   # 回合结算流程中：报告由结算反馈之后再弹，别抢
+const SAVE_PATH = "user://savegame.json"
+
+# 危机警示（大红叹号 + 红屏闪烁 + 雷霆大字）
+var crisis_root: Control
+var crisis_dim: ColorRect
+var crisis_icon: TextureRect
+var crisis_title: Label
+var crisis_tag: Label
+var crisis_body: RichTextLabel
+var crisis_button: Button
+var _crisis_queue: Array = []   # 危机弹窗队列 {crisis, is_warning}
+
+# 危机预警回顾（顶部条 + 全屏列表）
+var warn_bar: Button = null
+var warn_panel_root: Control = null
+var warn_list_box: VBoxContainer = null
+var warn_count_label: Label = null
+
+# 牌库 UI（牌堆）
+var deck_root: Control            # 牌堆容器（右面板下方）
+var deck_border: Control          # 黄色外框（悬停时显示，自绘贴牌形状）
+var deck_backs: Array = []        # 叠放的牌背（TextureRect）
+var _deck_hovered: bool = false
+var card_back_tex: Texture2D
+var deck_viewer: Control          # 牌库查看器（全屏弹层）
+var deck_viewer_grid: HFlowContainer
+var deck_viewer_scroll: ScrollContainer
+var _deck_open: bool = false
+var card_detail: Control          # 卡牌详情弹层（点击查看：左大牌 + 右介绍）
+var card_detail_card: CenterContainer  # 左侧大牌容器
+var card_detail_title: Label
+var card_detail_body: RichTextLabel
+var _detail_big_card: Control = null   # 当前详情大牌（用于重开时清理）
+var _ui_slide_tweens: Array = []       # 牌库开合时收放主界面的 tween
+var _ui_slide_origin: Dictionary = {}  # Control -> [l, t, r, b] 初始 offset
+var deck_sort_btn: Button             # 排序切换按钮（互旋箭头）
+var hand_sort_btn: Button             # 出牌阶段的同一个排序按钮（与牌库共用模式与冷却）
+## true=按类别，false=按费用。
+## 2026-09-29 起默认**按费用**：玩测反馈「找牌时先看掏不掏得起」，
+## 按费用排更省事；想按类别排，界面上那个切换按钮一点就换（牌库与手牌共用这一个开关）。
+var _deck_sort_by_category: bool = false
+## 手牌「抬起」的高度（选中/悬停时沿径向外移的距离）。
+## _update_card_hover 每帧用它，手牌排序的飞行落点也要用同一个值 ——
+## 写死两处早晚会漂移，抬起高度一变排序落点就不对了。
+const CARD_RAISE := 26.0
+const STAGED_CARD_WIDTH := 122.0
+const STAGED_CARD_GAP := 24.0
+const STAGED_CARD_SPACING := STAGED_CARD_WIDTH + STAGED_CARD_GAP
+var _sort_animating: bool = false
+var _sort_cooldown_ms: int = -6000   # 上次排序的时间戳；初始值只要足够久远即可（开局就能排序）
+const SORT_COOLDOWN_MS := 3000       # 两次切换排序方式的最低间隔（毫秒），冷却期间按钮禁用并显示倒计时
+# 出牌档位的冷却：切一次档后锁 1 秒，期间拉杆不吃输入、并在「出牌档位」旁边显示倒计时。
+# 初始值取足够久远 → 开局就是可用的。与排序那套（3 秒）同源，都是防连点。
+var _lever_cooldown_ms: int = -6000
+const LEVER_COOLDOWN_MS := 1000
+var _deck_gyro_view: Control = null   # 当前鼠标悬停的牌库卡牌（只对它做陀螺仪）
+
+# 知识卡图鉴（主页入口）：与牌库查看器同款的网格 + 悬停 + 详情，
+# 但它是**独立一层**（MenuLayer 之上，因为入口在开始页而不是对局里）。
+var knowledge_viewer: Control          # 知识卡图鉴（全屏弹层）
+var knowledge_grid: HFlowContainer     # 知识卡网格
+var knowledge_scroll: ScrollContainer
+var knowledge_count_label: Label       # 「已收集 x / 总数」
+var knowledge_detail: Control          # 知识卡详情弹层（覆盖在查看器之上）
+var knowledge_detail_card: CenterContainer  # 左侧大牌容器
+var knowledge_detail_title: Label
+var knowledge_detail_body: RichTextLabel
+var knowledge_detail_source: RichTextLabel   # 详情页底部的常驻出处栏（卡照 + 资料）
+var _knowledge_big_card: Control = null     # 当前详情大牌（重开时清理）
+var _knowledge_photo_cache: Dictionary = {} # kid -> Texture2D（null 也算缓存，避免反复探测文件）
+
+# 知识卡卡照：pptx 图集（《鄱阳湖 · 知识卡图集》）导入的 40 张，统一方裁成 1:1 的 512×512
+# （生成器 tools/import_knowledge_photos.py）。画进卡面本身，见 PixelCardArt.knowledge_texture()。
+const KNOWLEDGE_PHOTO_DIR := "res://assets/art/knowledge/photos/"
+
+# ==================== 算分动画（小丑牌风）====================
+# 五类来源的**展示**顺序。⚠ 与 end_turn() 的真实执行顺序**不同**：
+#   真实执行 = card → pending/leftover(advance_effects) → synergy(resolve_synergies) → routine(natural_evolution)
+# （pending 与 leftover 是同一处代码分出来的两支，见 game_state.gd 的 advance_effects：
+#   pending  = 本回合打出的延迟效果、当回合就到期（delay=1 即如此）
+#   leftover = 前几轮排队、现在才到期。
+#   拆两支是因为不拆的话，第 1 回合就会冒出「前几轮遗留」这种不存在的说法。）
+# 这里把 synergy 提到 leftover 之前（pending 留在原位），是为了让「协同」紧跟
+# 「本轮牌加成」出现，形成本回合组合技的即时反馈（玩家心智里协同属于"这一手牌"，不属于"旧账"）。
+# 代价：clampi(0,100) 的截断是路径相关的，按这个顺序累计时，若某指标被钉在
+#   100 附近且来源正负混合，数值条中间段可能偏几个点。
+# 兜底：_play_score_animation 把最后一段强制对齐真值 → 「终点」恒正确；
+#   而四段数字之和恒等于真实变化量（applied 已含截断修正）→ 「加总」恒正确。
+# 想让动画处处精确，把本数组换成 ["card", "leftover", "synergy", "routine"] 即可，
+# 其余代码一行都不用动（代价是协同节拍从中间挪到倒数第二拍）。
+const SCORE_PHASE_ORDER := ["card", "pending", "synergy", "leftover", "routine", "crisis"]
+const SCORE_PHASE_NAMES := {
+	"card": "本轮牌加成",
+	"pending": "本回合延迟生效",
+	"synergy": "卡牌协同",
+	"leftover": "前几轮遗留",
+	"routine": "常规演化",
+	"crisis": "危机爆发",
+}
+# ★ 指标结算节拍（③+④：图标放大抖动 → 四类来源依次弹 → 合计 → 数值条）的速度倍率。
+#   1.0 = 原速，0.8 = 慢到 80%（时长 ×1.25）。只影响指标结算这一段；
+#   甩牌与逐张弹分两拍不受影响（要一并调就改 T_TOTAL）。
+#   实现上不是只缩放总预算，而是把这一段里的**所有**时长（图标各段、
+#   小数字间隔、数值条推进、数值文本弹跳、小票滑入）都乘以 1/此值 ——
+#   否则图标那种固定的小节拍会保持原速，看起来像「顿一下」。
+const METRIC_SPEED := 0.80
+var score_layer: CanvasLayer = null        # 算分动画层（独立 CanvasLayer，层号 7）
+var score_stage: Control = null            # 舞台：全屏、不接收鼠标
+var score_floats: Control = null           # 卡牌上方 +N 飘字容器
+var score_receipt: PanelContainer = null   # 算分小票：滑到当前结算指标行的左侧
+var score_receipt_box: VBoxContainer = null
+var _score_anim_id: int = 0                # 动画代次：每个 await 回来校验，被作废就立刻退出
+var _score_animating: bool = false         # 动画中：锁输入 + 冻结指标 HUD/3D + 抑制悬停与小窗
+var impact_feedback: Node2D
+
+# ==================== 成就解锁提示 ====================
+var ach_layer: CanvasLayer = null          # 独立层，盖在 HUD 与算分动画之上
+var ach_popup: PanelContainer = null
+var ach_popup_icon: TextureRect = null
+var ach_popup_name: Label = null
+var ach_popup_desc: Label = null
+var _ach_queue: Array = []                 # 待播成就 id（一回合同时解锁多个时排队）
+var _ach_showing: bool = false
+var ach_count_label: Label = null          # 成就页顶部「已解锁 X / Y」
+var ach_rows_col: VBoxContainer = null     # 成就页列表容器（每次打开重建）
+
+# 3D 表现节点
+var lake_mesh: MeshInstance3D
+var lake_mat: ShaderMaterial
+var lake_color: Color = Color(0.62, 0.80, 0.86, 0.88)
+var grass_nodes: Array = []
+var grass_mats: Array = []
+var bird_nodes: Array = []
+var fish_nodes: Array = []
+var boats: Array = []   # 长江行船 [{rig, x, speed, dir}]
+var island_nodes: Array = []      # 人工浮岛节点
+var house_slots: Array = []       # 每项 {"house": Node3D, "sprite": Sprite3D, "reeds": Node3D}
+var species_views: Dictionary = {}  # sid -> {rigs[], bases[], states[], timers[], targets[]}
+var plant_views: Dictionary = {}    # pid -> {meshes[], kind}
+var plant_positions: Dictionary = {} # pid -> Array[Vector3]  每局随机散落的位置
+var _plant_pos_seed: int = -1        # 已生成位置对应的种子，换局时重新散落
+
+# 开场像素 PPT（Undertale 风：首次游玩讲背景）
+var intro_layer: CanvasLayer = null
+var intro_root: Control = null
+## 结局短片：美术交付的 mp4 原片（1080p30、2 分钟）转成了 Godot 唯一支持的 Ogg Theora。
+## 口径：四个难度各自第一次走完一局、看完结算报告回主菜单时自动播一次；设置里随时能重看；
+## 只要在播片，游戏 BGM 全程关掉，播完从头重放。
+const ENDING_VIDEO := "res://assets/video/ending.ogv"
+var ending_layer: CanvasLayer = null
+var ending_player: VideoStreamPlayer = null
+var ending_hint: Label = null
+var _ending_playing: bool = false
+var intro_col: VBoxContainer = null
+var intro_image: TextureRect = null
+var intro_body: Label = null
+var intro_hint: Label = null
+var intro_slides: Array = []
+var intro_index: int = 0
+var _intro_playing: bool = false
+var _intro_elapsed: float = 0.0
+var _intro_advancing: bool = false
+## 打字机：正文逐字显示，打完才开始算自动翻页的时间
+var _intro_full_text: String = ""
+var _intro_typed: float = 0.0
+var _intro_type_done: bool = true
+const INTRO_SLIDE_SEC := 6.5
+const INTRO_TYPE_CPS := 22.0
+
+
+func _ready() -> void:
+	add_to_group("motion_host")
+	_load_audio_settings()
+	_setup_bgm()
+	_setup_sfx()
+	_setup_pixel_font()
+	_setup_camera()
+	_build_wetland()
+	_build_ui()
+	GameState.metrics_changed.connect(_update_hud)
+	GameState.metrics_changed.connect(_update_3d)
+	GameState.funds_changed.connect(_update_hud)
+	GameState.event_triggered.connect(_on_event)
+	GameState.crisis_warned.connect(_on_crisis_warn)
+	GameState.crisis_hit.connect(_on_crisis_hit)
+	GameState.game_ended.connect(_on_game_end)
+	Achievements.achievement_unlocked.connect(_on_achievement_unlocked)
+	# 窗口尺寸/全屏变化时自适应相机，避免全屏后沙盘被裁或留黑边
+	get_viewport().size_changed.connect(_fit_camera_to_window)
+	_fit_camera_to_window()
+	if "--card-art-test" in OS.get_cmdline_user_args():
+		_show_menu()
+		_open_card_art_preview()
+		return
+	# 首次游玩先放开场 PPT；老玩家直接进主菜单
+	if _is_first_play():
+		_show_intro()
+	else:
+		_show_menu()
+
+
+## 开始页期间镜头拉远的倍率（正交 size 越大 = 视野越广）
+const MENU_CAM_ZOOM := 1.3
+
+
+## 根据窗口宽高比调整正交相机尺寸：让沙盘占满屏幕主体，不因宽屏被推远
+func _fit_camera_to_window() -> void:
+	if wetland:
+		wetland._layout_map()
+		return
+	var cam := get_node("../Camera3D") as Camera3D
+	if cam == null:
+		return
+	cam.size = _cam_base_size() * (MENU_CAM_ZOOM if menu_camera_far else 1.0)
+
+
+## 沙盘基准视野：竖直 31 单位，窄屏时按水平需求放宽
+func _cam_base_size() -> float:
+	var vp := get_viewport().get_visible_rect().size
+	if vp.y <= 0.0:
+		return 31.0
+	var aspect := vp.x / vp.y
+	# 沙盘在 45° 俯视下的垂直投影约 29 世界单位，留边距 → 垂直视野 31
+	const VIEW_H := 31.0
+	# 窄屏时保证水平也能容纳沙盘宽度
+	const NEED_W := 50.0
+	return maxf(VIEW_H, NEED_W / aspect)
+
+
+## 开始页：镜头先压回基准再缓缓推远（开场是「拉远」的动作，不是直接远景）；
+## 进入游戏时收回来。
+func _set_menu_camera(far: bool) -> void:
+	menu_camera_far = far
+	if wetland:
+		wetland.set_menu_camera(far, MENU_CAM_ZOOM)
+		return
+	var cam := get_node_or_null("../Camera3D") as Camera3D
+	if cam == null:
+		return
+	var base := _cam_base_size()
+	if far:
+		cam.size = base
+	var tween := Motion.tween(self, "linear")
+	Motion.curve(tween, "sine.out")
+	tween.tween_property(cam, "size", base * (MENU_CAM_ZOOM if far else 1.0), 1.2 if far else 0.8)
+
+
+# ==================== 相机 ====================
+func _setup_camera() -> void:
+	var cam := get_node("../Camera3D") as Camera3D
+	cam.projection = Camera3D.PROJECTION_ORTHOGONAL
+	cam.size = 26.0  # 更大的正交尺寸 = 视野更广，能看全沙盘
+	# 2.5D 等距俯视：方位角 45°、俯角 45°（视野开阔，地形一览无余）
+	cam.position = Vector3(14, 14, 14)
+	cam.look_at(Vector3(0, 0, 0), Vector3.UP)
+
+	# 沙盘地面：与远景布景协调的草绿（替代场景里的深绿盒子观感）
+	var ground_mesh := get_node_or_null("../Ground/GroundMesh") as MeshInstance3D
+	if ground_mesh:
+		var gm := StandardMaterial3D.new()
+		gm.albedo_color = Color(0.66, 0.74, 0.52)
+		gm.roughness = 1.0
+		ground_mesh.material_override = gm
+
+	# 柔白方向光（明亮通透，粉彩感）
+	var light := get_node("../DirectionalLight3D") as DirectionalLight3D
+	light.light_color = Color(1.0, 0.97, 0.92)
+	light.light_energy = 1.15
+	light.rotation_degrees = Vector3(-45, -35, 0)
+	light.shadow_enabled = true
+
+	# 提亮环境光，画面更柔和明亮
+	var env_node := get_node("../WorldEnvironment") as WorldEnvironment
+	if env_node and env_node.environment:
+		var env := env_node.environment
+		env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+		env.ambient_light_color = Color(0.76, 0.78, 0.72)
+		env.ambient_light_energy = 0.95
+		env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+
+
+# ==================== 3D 表现 ====================
+func _build_3d() -> void:
+	var lake_view := Node3D.new()
+	lake_view.name = "LakeView"
+	# 沙盘等比放大（改这个系数即可整体缩放，不影响布局）
+	lake_view.scale = Vector3(1.3, 1.3, 1.3)
+
+	# 湖面（鄱阳湖形不规则多边形 + 注入河流）
+	lake_mat = ShaderMaterial.new()
+	lake_mat.shader = _make_water_shader()
+	lake_mat.set_shader_parameter("water_color", lake_color)
+	_build_lake_shape(lake_view)
+
+	# 草洲（8 块，主湖区中的草岛，避开河流入湖口）
+	var grass_positions := [
+		Vector3(-5, 0.05, -1.5), Vector3(-1, 0.05, -2), Vector3(3.5, 0.05, -1.5),
+		Vector3(6, 0.05, 0.5), Vector3(1.5, 0.05, 1.5), Vector3(4.5, 0.05, 3.5),
+		Vector3(0, 0.05, 5), Vector3(-3.5, 0.05, 4.5),
+	]
+	for p in grass_positions:
+		var mi := MeshInstance3D.new()
+		var cm := BoxMesh.new()
+		cm.size = Vector3(3.0, 0.25, 3.0)
+		mi.mesh = cm
+		mi.position = p
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.64, 0.76, 0.50)
+		mi.material_override = mat
+		lake_view.add_child(mi)
+		grass_nodes.append(mi)
+		grass_mats.append(mat)
+
+	# 湿地泥滩（浅水与草洲之间的过渡带，暖褐色）
+	_build_mudflats(lake_view)
+
+	# 鸟群（8 只白鹤占位）—— 替换为多物种动态个体系统
+	_build_species_views(lake_view)
+
+	# 植物（不同湿地植物）
+	_build_plant_views(lake_view)
+
+	# 鱼群（8 条占位，水下）
+	for i in 8:
+		var mi := MeshInstance3D.new()
+		var sm := SphereMesh.new()
+		sm.radius = 0.14
+		sm.height = 0.35
+		mi.mesh = sm
+		mi.position = Vector3(-5 + i * 1.6, -0.15, 2 - (i % 3) * 1.8)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.70, 0.76, 0.82)
+		mi.material_override = mat
+		lake_view.add_child(mi)
+		fish_nodes.append(mi)
+
+	# 人工浮岛（初始隐藏，打出「人工浮岛」牌后显示）
+	_build_floating_islands(lake_view)
+
+	# 渔村（湖边一排房子）
+	_build_village(lake_view)
+
+	# 长江行船（装饰性，沿长江缓缓往返）
+	_build_boats(lake_view)
+
+	# 远景布景草地（环绕沙盘的低多边形起伏草原，不参与游戏交互）
+	_build_backdrop_grass(lake_view)
+
+	# 彩蛋：左上角草地刻一个 Minecraft 苦力怕的脸
+	_build_creeper_easter_egg(lake_view)
+
+	# 延迟挂到场景，避免父节点初始化期 add_child 冲突
+	var root := get_parent() as Node3D
+	root.add_child.call_deferred(lake_view)
+
+
+## 构建鄱阳湖形水面：南宽北狭的「宝葫芦」形，北部狭长入江水道连长江
+func _build_lake_shape(parent: Node3D) -> void:
+	# 鄱阳湖轮廓（XZ 平面多边形，北为 -z，南为 +z；北窄为入江水道，南宽为主湖区）
+	var outline: PackedVector2Array = [
+		Vector2(-2.0, -15.5), Vector2(2.0, -15.5),
+		Vector2(2.4, -11.5), Vector2(2.8, -8.0), Vector2(3.4, -5.5),
+		Vector2(6.5, -5.0), Vector2(8.5, -3.0), Vector2(9.4, 0.0),
+		Vector2(9.0, 3.0), Vector2(7.6, 5.5),
+		Vector2(5.8, 7.6), Vector2(3.4, 8.4), Vector2(0.0, 8.9),
+		Vector2(-3.4, 8.4), Vector2(-5.8, 7.6),
+		Vector2(-7.6, 5.5), Vector2(-9.0, 3.0), Vector2(-9.4, 0.0),
+		Vector2(-8.5, -3.0), Vector2(-6.5, -5.0),
+		Vector2(-3.4, -5.5), Vector2(-2.8, -8.0), Vector2(-2.4, -11.5),
+	]
+	lake_mesh = _make_flat_polygon(outline, 0.08, lake_mat)
+	lake_mesh.name = "PoyangLake"
+	parent.add_child(lake_mesh)
+	_build_rivers(parent)
+
+
+## 由中心线生成河流轮廓（两侧各偏移半宽，中心线可弯曲）
+func _river_outline(center: PackedVector2Array, width: float) -> PackedVector2Array:
+	var left: PackedVector2Array = []
+	var right: PackedVector2Array = []
+	var n := center.size()
+	for i in n:
+		var prev: Vector2 = center[clampi(i - 1, 0, n - 1)]
+		var nxt: Vector2 = center[clampi(i + 1, 0, n - 1)]
+		var dir: Vector2 = (nxt - prev)
+		if dir.length() < 0.0001:
+			dir = Vector2(1, 0)
+		dir = dir.normalized()
+		var normal := Vector2(-dir.y, dir.x)  # 垂直方向
+		var half := width * 0.5
+		left.append(center[i] + normal * half)
+		right.append(center[i] - normal * half)
+	var outline := left.duplicate()
+	for i in range(n - 1, -1, -1):
+		outline.append(right[i])
+	return outline
+
+
+## 长江中心线的 z 坐标（随 x 蜿蜒），生成河面与压平地形的公共基准
+func _yangtze_z(x: float) -> float:
+	return -14.5 + sin(x * 0.16) * 1.0 + sin(x * 0.043 + 1.3) * 0.7
+
+
+## 河流：长江（北，蜿蜒自西向东）+ 赣江（南，自南向北，与之垂直）+ 修水/饶河
+func _build_rivers(parent: Node3D) -> void:
+	# 长江：北侧蜿蜒大河，湖体北口（入江水道 z=-14）汇入其中；两端延伸出镜头
+	var yangtze_center := PackedVector2Array()
+	for i in range(-75, 61, 5):
+		var x := float(i)
+		yangtze_center.append(Vector2(x, _yangtze_z(x)))
+	var yangtze := _make_flat_polygon(_river_outline(yangtze_center, 2.6), 0.08, lake_mat)
+	yangtze.name = "Yangtze"
+	parent.add_child(yangtze)
+
+	# 赣江：南侧，自南向北注入湖体南部（第一大支流，与长江近垂直）；南端延伸出镜头
+	var gan_center := PackedVector2Array()
+	for i in range(6, 61, 4):
+		gan_center.append(Vector2(0.0, float(i)))
+	var gan := _make_flat_polygon(_river_outline(gan_center, 1.8), 0.08, lake_mat)
+	gan.name = "GanRiver"
+	parent.add_child(gan)
+
+	# 修水：西北注入
+	var xiu_center := PackedVector2Array([
+		Vector2(-6.0, -3.5), Vector2(-9.5, -6.0), Vector2(-12.5, -8.0), Vector2(-15.0, -10.5),
+	])
+	var xiu := _make_flat_polygon(_river_outline(xiu_center, 1.1), 0.08, lake_mat)
+	xiu.name = "XiuRiver"
+	parent.add_child(xiu)
+
+	# 饶河：东侧注入
+	var rao_center := PackedVector2Array([
+		Vector2(8.0, 1.5), Vector2(11.0, 0.5), Vector2(14.0, 1.5), Vector2(16.5, 2.5),
+	])
+	var rao := _make_flat_polygon(_river_outline(rao_center, 1.0), 0.08, lake_mat)
+	rao.name = "RaoRiver"
+	parent.add_child(rao)
+
+
+# ==================== 长江行船 ====================
+## 生成几艘在长江上缓缓往返的船（装饰，不参与游戏交互）
+func _build_boats(parent: Node3D) -> void:
+	var configs := [
+		{"x": -60.0, "speed": 3.2, "dir": 1.0},
+		{"x": 18.0, "speed": 2.4, "dir": -1.0},
+		{"x": 44.0, "speed": 3.8, "dir": 1.0},
+	]
+	for c in configs:
+		var rig := _make_boat()
+		var x: float = c["x"]
+		var z: float = _yangtze_z(x)
+		rig.position = Vector3(x, 0.12, z)
+		parent.add_child(rig)
+		boats.append({"rig": rig, "x": x, "speed": c["speed"], "dir": c["dir"]})
+
+
+## 单艘船的模型：棕色船体 + 船舱 + 桅杆（船头朝 +Z）
+func _make_boat() -> Node3D:
+	var boat := Node3D.new()
+	var hull := MeshInstance3D.new()
+	var hm := BoxMesh.new()
+	hm.size = Vector3(0.75, 0.32, 1.9)  # 宽(x) × 高(y) × 长(z，船头朝 +z)
+	hull.mesh = hm
+	hull.material_override = _mat(Color(0.48, 0.34, 0.24))
+	hull.position = Vector3(0, 0.16, 0)
+	boat.add_child(hull)
+	var cabin := MeshInstance3D.new()
+	var cm := BoxMesh.new()
+	cm.size = Vector3(0.6, 0.5, 0.7)
+	cabin.mesh = cm
+	cabin.material_override = _mat(Color(0.62, 0.46, 0.32))
+	cabin.position = Vector3(0, 0.5, -0.35)  # 靠后（-z）
+	boat.add_child(cabin)
+	var mast := MeshInstance3D.new()
+	var mm := CylinderMesh.new()
+	mm.top_radius = 0.03
+	mm.bottom_radius = 0.05
+	mm.height = 0.9
+	mast.mesh = mm
+	mast.material_override = _mat(Color(0.35, 0.28, 0.22))
+	mast.position = Vector3(0, 0.75, 0.2)
+	boat.add_child(mast)
+	return boat
+
+
+## 长江行船漂移：沿长江中心线缓行，驶出边界后从另一端折返
+func _process_boats(delta: float) -> void:
+	for b in boats:
+		var rig: Node3D = b["rig"]
+		var x: float = b["x"] + b["speed"] * b["dir"] * delta
+		if x > 61.0:
+			x = -76.0
+		elif x < -76.0:
+			x = 61.0
+		b["x"] = x
+		# 河流切向 / 垂向：相向而行的船分走河道两侧「车道」，避免会船时穿模
+		var dz: float = _yangtze_z(x + 0.6) - _yangtze_z(x - 0.6)
+		var tangent := Vector2(1.0, dz).normalized()
+		var normal := Vector2(-tangent.y, tangent.x)
+		var lane: float = 0.5 * float(b["dir"])
+		var zc: float = _yangtze_z(x)
+		rig.position = Vector3(x + normal.x * lane, 0.12, zc + normal.y * lane)
+		# 朝向河水流向（船头 +Z 对准切线方向）
+		rig.rotation.y = atan2(b["dir"], dz * b["dir"])
+
+
+## 用多边形构建一块平面水面（在 y 平面，unshaded 水面材质）
+func _make_flat_polygon(points: PackedVector2Array, y: float, mat: Material) -> MeshInstance3D:
+	var indices := Geometry2D.triangulate_polygon(points)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for i in indices:
+		var p: Vector2 = points[i]
+		st.set_normal(Vector3.UP)
+		st.add_vertex(Vector3(p.x, y, p.y))
+	var mi := MeshInstance3D.new()
+	mi.mesh = st.commit()
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	return mi
+
+
+## 为鸟类找一个栖息点：优先乔木树冠，其次草洲/挺水植物
+func _find_perch_point(sid: String, seed_i: int) -> Vector3:
+	# 优先在乔木上停歇（树冠高度约 1.5~2.6）
+	var tree_rigs: Array = plant_views.get("chishan", {}).get("rigs", [])
+	var visible_trees: Array = []
+	for r in tree_rigs:
+		if r.visible:
+			visible_trees.append(r)
+	if not visible_trees.is_empty():
+		var t: Node3D = visible_trees[(seed_i * 7 + int(sid.length())) % visible_trees.size()]
+		return t.position + Vector3(0, 2.5, 0)
+	# 退而求其次：草洲/挺水植物上方
+	for kind_want in ["marsh", "emergent"]:
+		for pid in plant_views:
+			if plant_views[pid]["kind"] != kind_want:
+				continue
+			var rigs: Array = plant_views[pid]["rigs"]
+			var vis: Array = []
+			for r in rigs:
+				if r.visible:
+					vis.append(r)
+			if not vis.is_empty():
+				var p: Node3D = vis[(seed_i * 5 + 3) % vis.size()]
+				return p.position + Vector3(0, 1.2, 0)
+	# 最后兜底：原地
+	return Vector3(-6 + seed_i * 1.2, 1.0, -3 + (seed_i % 3) * 2.0)
+
+
+## 远景布景：环绕沙盘的起伏草原（纯装饰，不参与任何游戏交互）
+func _build_backdrop_grass(parent: Node3D) -> void:
+	var backdrop := Node3D.new()
+	backdrop.name = "Backdrop"
+	parent.add_child(backdrop)
+
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 20260925  # 固定种子，每次启动地貌一致
+
+	# 1) 起伏地面：大尺寸 PlaneMesh + 顶点位移（用 SurfaceTool 造波状起伏）
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var half := 90.0     # 覆盖 180×180，远超沙盘，视野边缘不会露空
+	var cells := 60
+	var step := half * 2.0 / cells
+	for ix in cells:
+		for iz in cells:
+			var x0 := -half + ix * step
+			var z0 := -half + iz * step
+			var x1 := x0 + step
+			var z1 := z0 + step
+			var v00 := Vector3(x0, _backdrop_height(x0, z0), z0)
+			var v10 := Vector3(x1, _backdrop_height(x1, z0), z0)
+			var v01 := Vector3(x0, _backdrop_height(x0, z1), z1)
+			var v11 := Vector3(x1, _backdrop_height(x1, z1), z1)
+			# 双面渲染 + 显式向上法线，彻底避免朝向/背光问题
+			var up := Vector3.UP
+			st.set_normal(up); st.add_vertex(v00)
+			st.set_normal(up); st.add_vertex(v11)
+			st.set_normal(up); st.add_vertex(v01)
+			st.set_normal(up); st.add_vertex(v00)
+			st.set_normal(up); st.add_vertex(v10)
+			st.set_normal(up); st.add_vertex(v11)
+	var ground := MeshInstance3D.new()
+	ground.mesh = st.commit()
+	ground.material_override = _mat(Color(0.66, 0.74, 0.54))
+	ground.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	ground.position = Vector3(0, -0.28, 0)  # 略低于沙盘地面，避免z-fighting
+	backdrop.add_child(ground)
+
+	# 2) 散落的远景树（沙盘外围才放，避免遮挡主场景）
+	var tree_spots: Array = []
+	for k in 150:
+		var ang := rng.randf_range(0, TAU)
+		var dist := rng.randf_range(24.0, 82.0)  # 只在沙盘(±18)之外
+		var x := cos(ang) * dist
+		var z := sin(ang) * dist
+		if _in_river_zone(x, z) or _in_creeper_zone(x, z):
+			continue
+		tree_spots.append(Vector3(x, _backdrop_height(x, z), z))
+	for p in tree_spots:
+		var t := _make_backdrop_tree(rng)
+		t.position = p
+		backdrop.add_child(t)
+
+	# 3) 灌木丛点缀
+	for k in 90:
+		var ang := rng.randf_range(0, TAU)
+		var dist := rng.randf_range(22.0, 85.0)
+		var x := cos(ang) * dist
+		var z := sin(ang) * dist
+		if _in_river_zone(x, z) or _in_creeper_zone(x, z):
+			continue
+		var bush := MeshInstance3D.new()
+		var bm := SphereMesh.new()
+		bm.radius = rng.randf_range(0.7, 1.4)
+		bm.height = bm.radius * 1.1
+		bush.mesh = bm
+		bush.material_override = _mat(Color(0.52, 0.64, 0.44).lightened(rng.randf_range(0.0, 0.14)))
+		bush.position = Vector3(x, _backdrop_height(x, z) + bm.radius * 0.4, z)
+		bush.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		backdrop.add_child(bush)
+
+
+## 是否处于河流走廊内（长江/赣江水面 + 河岸），用于让远景树/灌木避开河道
+func _in_river_zone(x: float, z: float) -> bool:
+	if x > -77.0 and x < 62.0 and absf(z - _yangtze_z(x)) < 4.0:
+		return true
+	if z > 5.0 and z < 61.0 and absf(x) < 4.0:
+		return true
+	return false
+
+
+## 是否处于苦力怕彩蛋区域，用于让远景树/灌木避开
+func _in_creeper_zone(x: float, z: float) -> bool:
+	return Vector2(x - CREEPER_X, z - CREEPER_Z).length() < 7.0
+
+
+## 远景地形高度：几层正弦叠加，形成平缓起伏（距离沙盘越远越不必精确）
+func _backdrop_height(x: float, z: float) -> float:
+	var h := sin(x * 0.11) * cos(z * 0.13) * 1.6
+	h += sin(x * 0.31 + 1.7) * cos(z * 0.27 - 0.6) * 0.55
+	h += sin(x * 0.63 - 0.4) * cos(z * 0.58 + 2.1) * 0.22
+	# 河流走廊压平到河床高度，避免延伸出的河面被起伏地形掩埋
+	var yangtze_d := absf(z - _yangtze_z(x))
+	if x > -77.0 and x < 62.0 and yangtze_d < 4.0:
+		h = lerpf(-0.28, h, clampf((yangtze_d - 2.2) / 1.8, 0.0, 1.0))
+	elif z > 5.0 and z < 61.0 and absf(x) < 4.0:
+		h = lerpf(-0.28, h, clampf((absf(x) - 1.8) / 2.2, 0.0, 1.0))
+	# 苦力怕彩蛋草地压平，保证脸平整贴地
+	var creeper_d := Vector2(x - CREEPER_X, z - CREEPER_Z).length()
+	if creeper_d < 8.0:
+		h = lerpf(-0.28, h, clampf((creeper_d - 5.0) / 3.0, 0.0, 1.0))
+	# 靠近沙盘（半径 22 内）压平并下沉，与沙盘地面平滑衔接
+	var d := Vector2(x, z).length()
+	if d < 26.0:
+		var t := clampf((d - 20.0) / 6.0, 0.0, 1.0)
+		h = lerpf(-0.28, h, t)
+	return h
+
+
+## 彩蛋：左上角草地贴一张苦力怕脸（用素材图片，已抠掉亮绿背景）
+func _build_creeper_easter_egg(parent: Node3D) -> void:
+	# 优先走导入资源（导出打包也能用），失败则直接读文件
+	var tex: Texture2D = load("res://assets/creeper.png")
+	if tex == null:
+		var img := Image.load_from_file("res://assets/creeper.png")
+		if img == null:
+			return
+		tex = ImageTexture.create_from_image(img)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_texture = tex
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL  # 与草地同受光照，头部才能和草地同色
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+	var mi := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	var aspect := float(tex.get_width()) / float(tex.get_height())
+	pm.size = Vector2(CREEPER_SIZE, CREEPER_SIZE / aspect)
+	mi.mesh = pm
+	mi.material_override = mat
+	# 草地压平后高度为 -0.28（顶点）+ 节点 -0.28，脸贴在其上略微抬高避免 z-fighting
+	mi.position = Vector3(CREEPER_X, -0.28 + _backdrop_height(CREEPER_X, CREEPER_Z) + 0.02, CREEPER_Z)
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(mi)
+	creeper_mesh = mi
+
+
+## 苦力怕彩蛋按概率显示（每次进入主菜单重掷）
+func _roll_creeper_visibility() -> void:
+	if creeper_mesh != null:
+		creeper_mesh.visible = randf() < CREEPER_CHANCE
+	if wetland != null:
+		wetland.call("roll_creeper_visibility")
+
+
+## 远景树：低多边形锥形树（随机高矮胖瘦）
+func _make_backdrop_tree(rng: RandomNumberGenerator) -> Node3D:
+	var tree := Node3D.new()
+	var h := rng.randf_range(2.2, 4.6)
+	var trunk := MeshInstance3D.new()
+	var tm := CylinderMesh.new()
+	tm.top_radius = 0.10
+	tm.bottom_radius = 0.20
+	tm.height = h * 0.45
+	trunk.mesh = tm
+	trunk.material_override = _mat(Color(0.55, 0.45, 0.36))
+	trunk.position = Vector3(0, h * 0.225, 0)
+	tree.add_child(trunk)
+	var layers := 2 + rng.randi() % 2
+	for layer in layers:
+		var canopy := MeshInstance3D.new()
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.03
+		var r := h * 0.30 * (1.0 - layer * 0.22)
+		cm.bottom_radius = r
+		cm.height = h * 0.42
+		canopy.mesh = cm
+		var green := rng.randf_range(0.55, 0.72)
+		canopy.material_override = _mat(Color(green * 0.80, green, green * 0.82))
+		canopy.position = Vector3(0, h * 0.42 + layer * h * 0.20, 0)
+		canopy.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		tree.add_child(canopy)
+	return tree
+
+
+## 人工浮岛：水面上的绿色浮床（打出「人工浮岛」牌后显示，拆除牌后隐藏）
+func _build_floating_islands(parent: Node3D) -> void:
+	var island_positions := [
+		Vector3(-4, 0, -2.5), Vector3(0, 0, -0.5), Vector3(3.5, 0, 2), Vector3(-2, 0, 3.5),
+	]
+	for p in island_positions:
+		var island := _make_floating_island()
+		island.position = p
+		island.visible = false
+		parent.add_child(island)
+		island_nodes.append(island)
+
+
+## 单个浮岛模型：棕色浮床底座 + 绿色植被 + 几株挺水植物
+func _make_floating_island() -> Node3D:
+	var island := Node3D.new()
+	# 浮床底座
+	var base := MeshInstance3D.new()
+	var bm := BoxMesh.new()
+	bm.size = Vector3(1.8, 0.16, 1.4)
+	base.mesh = bm
+	base.material_override = _mat(Color(0.55, 0.42, 0.30))
+	base.position = Vector3(0, 0.17, 0)
+	island.add_child(base)
+	# 植被层
+	var veg := MeshInstance3D.new()
+	var vm := BoxMesh.new()
+	vm.size = Vector3(1.4, 0.28, 1.0)
+	veg.mesh = vm
+	veg.material_override = _mat(Color(0.40, 0.66, 0.36))
+	veg.position = Vector3(0, 0.38, 0)
+	island.add_child(veg)
+	# 几株挺水植物点缀
+	for k in 3:
+		var sprout := MeshInstance3D.new()
+		var sm := CylinderMesh.new()
+		sm.top_radius = 0.02
+		sm.bottom_radius = 0.05
+		sm.height = 0.5 + (k % 2) * 0.15
+		sprout.mesh = sm
+		sprout.material_override = _mat(Color(0.45, 0.70, 0.38))
+		sprout.position = Vector3((k - 1) * 0.5, 0.38 + (0.5 + (k % 2) * 0.15) / 2.0, (k % 2 - 0.5) * 0.3)
+		island.add_child(sprout)
+	return island
+
+
+## 湖边社区：房子数量随用地（settlement）增减，原地拆除处长出湿地芦苇；颜色随社区信任度明暗变化
+func _build_village(parent: Node3D) -> void:
+	var house_positions := [
+		Vector3(-13, 0, -6.5), Vector3(-12.5, 0, -5.2), Vector3(-13, 0, -3.4),
+		Vector3(-12.2, 0, -1.6), Vector3(-10.6, 0, 0.2),   # 原有 5 栋（离湖较远）
+		Vector3(-9.5, 0, -4.2), Vector3(-10.2, 0, -0.6),   # 新增 2 栋（侵占，靠湖，落在岸上）
+	]
+	# 美术素材：九款民居（三组同族变体 + 独立第四款）按「局种子 + 位置」取，
+	# 与地图层 pixel_wetland 用同一套算法 —— 局内稳定，换局才洗牌。
+	var house_tex_paths := [
+		"res://assets/houses/house1.png",
+		"res://assets/houses/house1_1.png",
+		"res://assets/houses/house1_2.png",
+		"res://assets/houses/house2.png",
+		"res://assets/houses/house2_1.png",
+		"res://assets/houses/house2_2.png",
+		"res://assets/houses/house3.png",
+		"res://assets/houses/house3_1.png",
+		"res://assets/houses/house4.png",
+	]
+	for i in house_positions.size():
+		var p: Vector3 = house_positions[i]
+		var art_index := int(abs(hash("%d:%d" % [GameState.run_seed, i]))) % house_tex_paths.size()
+		var house := _make_house(house_tex_paths[art_index])
+		house.position = p
+		parent.add_child(house)
+		var reeds := _make_reed_clump()
+		reeds.position = p
+		reeds.visible = false
+		parent.add_child(reeds)
+		var sprite := house.get_child(0) as Sprite3D
+		house_slots.append({"house": house, "sprite": sprite, "reeds": reeds})
+
+
+## 用美术同学画的房屋素材（2D 贴图广告牌）替代原来的 3D 盒子房。
+## 返回一个 Node3D 容器（落点 y=0 贴地），内部 Sprite3D 上移半高让贴图底部贴住地面。
+func _make_house(path: String) -> Node3D:
+	# 优先用导入的贴图（含 mipmap、导出后仍可用）；未导入时直接读 PNG 字节兜底
+	var tex: Texture2D = load(path) as Texture2D
+	if tex == null:
+		var img := Image.load_from_file(path)
+		if img != null:
+			tex = ImageTexture.create_from_image(img)
+	if tex == null:
+		# 素材缺失/读不到时兜底：纯色方块，保证不崩
+		var fallback := Image.create(4, 4, false, Image.FORMAT_RGBA8)
+		fallback.fill(Color(0.88, 0.78, 0.62))
+		tex = ImageTexture.create_from_image(fallback)
+
+	var node := Node3D.new()
+	var sprite := Sprite3D.new()
+	sprite.texture = tex
+	sprite.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
+	sprite.pixel_size = 0.02
+	sprite.position = Vector3(0, 1.0, 0)   # 贴图中心上移，底部贴地
+	node.add_child(sprite)
+	return node
+
+
+## 退还湿地的芦苇丛（房子拆除后的替代植被）：低矮底垫 + 几根细高秆芦苇
+func _make_reed_clump() -> Node3D:
+	var clump := Node3D.new()
+	# 底垫：低矮泥/草地，表示田地已退为湿地
+	var pad := MeshInstance3D.new()
+	var pm := BoxMesh.new()
+	pm.size = Vector3(1.5, 0.12, 1.3)
+	pad.mesh = pm
+	pad.material_override = _mat(Color(0.58, 0.70, 0.48))
+	pad.position = Vector3(0, 0.06, 0)
+	clump.add_child(pad)
+	# 芦苇：细高秆 + 顶部穗
+	var reed_col := Color(0.62, 0.72, 0.50)
+	for k in 5:
+		var ang := k * 1.26
+		var h := 1.5 + (k % 3) * 0.22
+		var stalk := MeshInstance3D.new()
+		var sm := CylinderMesh.new()
+		sm.top_radius = 0.03
+		sm.bottom_radius = 0.05
+		sm.height = h
+		stalk.mesh = sm
+		stalk.material_override = _mat(reed_col)
+		stalk.position = Vector3(cos(ang) * 0.34, 0.06 + h / 2.0, sin(ang) * 0.30)
+		clump.add_child(stalk)
+		var tassel := MeshInstance3D.new()
+		var tm := CylinderMesh.new()
+		tm.top_radius = 0.02
+		tm.bottom_radius = 0.07
+		tm.height = 0.28
+		tassel.mesh = tm
+		tassel.material_override = _mat(reed_col.lightened(0.28))
+		tassel.position = Vector3(cos(ang) * 0.34, 0.06 + h, sin(ang) * 0.30)
+		clump.add_child(tassel)
+	return clump
+
+
+## 水面 shader：轻微微波 + 波光
+func _make_water_shader() -> Shader:
+	var sh := Shader.new()
+	sh.code = """
+shader_type spatial;
+render_mode blend_mix, depth_draw_never, cull_disabled, unshaded;
+
+uniform vec4 water_color : source_color = vec4(0.62, 0.80, 0.86, 0.88);
+uniform float wave_speed = 0.55;
+uniform float wave_strength = 0.06;
+
+void fragment() {
+	// 两层正弦叠加，形成缓慢流动的波纹
+	float w1 = sin(VERTEX.x * 2.2 + TIME * wave_speed) * 0.5 + 0.5;
+	float w2 = sin(VERTEX.z * 1.7 - TIME * wave_speed * 0.8) * 0.5 + 0.5;
+	float ripple = (w1 * w2);
+	// 波光提亮水面，产生细微的明暗流动
+	vec3 col = water_color.rgb + vec3(0.10, 0.13, 0.16) * ripple * wave_strength * 16.0;
+	ALBEDO = col;
+	ALPHA = water_color.a;
+}
+"""
+	return sh
+
+
+## 全屏像素化后处理：把屏幕 UV 量化到 pixel_size 大小的块，形成块状像素
+func _make_pixelate_shader() -> Shader:
+	var sh := Shader.new()
+	sh.code = """
+shader_type canvas_item;
+uniform float pixel_size : hint_range(1.0, 16.0) = 3.5;
+uniform sampler2D screen_texture : hint_screen_texture;
+
+void fragment() {
+	// 最近邻像素化：按块取左上角像素，整块同色
+	vec2 block = SCREEN_PIXEL_SIZE * pixel_size;
+	vec2 uv = floor(SCREEN_UV / block) * block;
+	COLOR = texture(screen_texture, uv);
+}
+"""
+	return sh
+
+
+## 像素化图层：位于 UICanvas(layer=1) 之下，只像素化 3D，HUD/文字保持清晰
+func _build_pixelate_layer() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "PixelateLayer"
+	layer.layer = 0  # 只像素化 3D，UI/文字保持清晰锐利
+	add_child(layer)
+	var rect := ColorRect.new()
+	rect.set_anchors_preset(Control.PRESET_FULL_RECT)
+	rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sm := ShaderMaterial.new()
+	sm.shader = _make_pixelate_shader()
+	rect.material = sm
+	layer.add_child(rect)
+
+
+## 生成棋盘网格线（生息演算式棋盘感）
+func _build_grid(parent: Node3D) -> void:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_LINES)
+	var half := 18.0      # 网格半宽（覆盖 36×36）
+	var step := 2.0       # 格子大小 2 米
+	var y := 0.12         # 略高于地面与湖面
+	var n := int(half / step)  # 每方向 9 条线（-18..18）
+	for i in range(-n, n + 1):
+		var c := i * step
+		# 横向线（沿 X）
+		st.add_vertex(Vector3(-half, y, c))
+		st.add_vertex(Vector3(half, y, c))
+		# 纵向线（沿 Z）
+		st.add_vertex(Vector3(c, y, -half))
+		st.add_vertex(Vector3(c, y, half))
+	var grid_mesh := st.commit()
+
+	var mi := MeshInstance3D.new()
+	mi.name = "GridLines"
+	mi.mesh = grid_mesh
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(1.0, 1.0, 1.0, 0.28)
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	parent.add_child(mi)
+
+
+## 湿地泥滩（浅水与草洲之间的过渡带，暖褐色）
+func _build_mudflats(parent: Node3D) -> void:
+	var positions := [
+		Vector3(-12, 0.03, 0), Vector3(12, 0.03, -2), Vector3(-3, 0.03, -12),
+		Vector3(3, 0.03, 12), Vector3(-9, 0.03, 7), Vector3(9, 0.03, -8),
+	]
+	for p in positions:
+		var mi := MeshInstance3D.new()
+		var cm := BoxMesh.new()
+		cm.size = Vector3(4.0, 0.15, 4.0)
+		mi.mesh = cm
+		mi.position = p
+		var mat := StandardMaterial3D.new()
+		mat.albedo_color = Color(0.80, 0.72, 0.60)
+		mi.material_override = mat
+		parent.add_child(mi)
+
+
+func _process(delta: float) -> void:
+	_update_bgm_state()
+	# 指标悬停小窗：暂停/弹层时它自己会收起来，所以放在 _paused 提前返回之前
+	_update_metric_tip()
+	if wetland:
+		wetland.set_process(not _paused)
+	if _paused:
+		return
+	if not _metric_preview_values.is_empty() and not (wetland and wetland.reduced_motion):
+		_metric_preview_clock += delta
+	# 开场 PPT：先打字机把正文打完，打完再计时 6.5 秒自动过一张
+	if _intro_playing:
+		if _intro_type_done:
+			_intro_elapsed += delta
+			if _intro_elapsed >= INTRO_SLIDE_SEC:
+				_advance_intro()
+		else:
+			_intro_typed += delta * INTRO_TYPE_CPS
+			_intro_update_typing()
+	_update_card_hover(delta)
+	_process_card_drag(delta)
+	_process_staged_cards(delta)
+	_update_metric_preview()
+	_update_execute_button()
+	_process_deck_gyro(delta)
+	_process_detail_gyro(delta)   # 点开的那张放大牌：指针压上去时同样要晃
+	_update_sort_cooldown()
+	_update_lever_cooldown()
+	# 容器尺寸变化时重排扇形（居中）
+	# ⚠ 算分动画期间必须跳过：_layout_fan() 会把牌瞬间抓回扇形原位**并覆写 base_pos**，
+	#   飞出去排开的牌会被一把拽回来。（正常情况下这个尺寸判据是稳定的，
+	#   但动画期间任何一次布局抖动都会毁掉整段演出。）
+	if not _score_animating and not _card_dragging and card_box != null and card_box.size.x > 10.0:
+		if _fan_layout_size.distance_to(card_box.size) > 1.0:
+			_layout_fan()
+
+
+## 植物随风轻微摆动（只有挺水/乔木/草洲这类露出水面的才明显摆动）
+func _process_plants_sway() -> void:
+	var t := Time.get_ticks_msec() / 1000.0
+	for pid in plant_views:
+		var kind: String = plant_views[pid]["kind"]
+		if kind == "submerged":
+			continue  # 沉水植物随水波，不随风
+		var amp := 0.045 if kind == "emergent" else 0.03
+		var rigs: Array = plant_views[pid]["rigs"]
+		for i in rigs.size():
+			var rig: Node3D = rigs[i]
+			if not rig.visible:
+				continue
+			# 各自相位错开，避免整齐划一
+			var ph := i * 0.8 + rig.position.x * 0.3
+			rig.rotation.z = sin(t * 1.1 + ph) * amp
+			rig.rotation.x = cos(t * 0.9 + ph * 1.3) * amp * 0.6
+
+
+## 鸟类状态机：站立 / 啄水 / 行走，朝向符合移动方向
+func _process_birds(delta: float) -> void:
+	for sid in species_views:
+		var view: Dictionary = species_views[sid]
+		var rigs: Array = view["rigs"]
+		var bases: Array = view["bases"]
+		var states: Array = view["states"]
+		var timers: Array = view["timers"]
+		var targets: Array = view["targets"]
+		for i in rigs.size():
+			var rig: Node3D = rigs[i]
+			if not rig.visible:
+				continue
+			var base: Vector3 = bases[i]
+			timers[i] -= delta
+			if timers[i] <= 0.0:
+				# 切换状态
+				var r := randf()
+				# 植被好时，更高概率找栖息地停歇（体现生态联动）
+				var veg: int = GameState.metrics.get("vegetation", 50)
+				var perch_chance := 0.12 + float(veg) / 100.0 * 0.25
+				if r < perch_chance:
+					states[i] = 3  # 停歇（飞到栖息点）
+					timers[i] = 6.0 + randf() * 4.0
+					targets[i] = _find_perch_point(sid, i)
+				elif r < 0.45:
+					states[i] = 0  # 站立
+					timers[i] = 1.0 + randf() * 2.5
+				elif r < 0.78:
+					states[i] = 1  # 啄水
+					timers[i] = 1.2 + randf() * 1.4
+				else:
+					states[i] = 2  # 行走
+					timers[i] = 2.0 + randf() * 2.5
+					var ang := randf() * TAU
+					var dist := 1.6 + randf() * 3.5
+					targets[i] = base + Vector3(cos(ang) * dist, 0, sin(ang) * dist)
+
+			var st: int = states[i]
+			match st:
+				0:  # 站立：回正，静止
+					rig.rotation.x = lerpf(rig.rotation.x, 0.0, delta * 6.0)
+					rig.position.y = base.y
+				1:  # 啄水：俯身低头
+					rig.rotation.x = lerpf(rig.rotation.x, 0.55, delta * 8.0)
+					rig.position.y = base.y
+				2:  # 行走：朝目标移动，朝向移动方向
+					var target: Vector3 = targets[i]
+					var to_t := target - rig.position
+					var flat := Vector3(to_t.x, 0, to_t.z)
+					if flat.length() < 0.2:
+						states[i] = 0
+						timers[i] = 1.0 + randf() * 2.0
+						rig.rotation.x = lerpf(rig.rotation.x, 0.0, delta * 6.0)
+					else:
+						var dir := flat.normalized()
+						var speed := 0.9
+						rig.position += dir * speed * delta
+						# 朝向移动方向（喙在 +Z）
+						rig.rotation.y = atan2(dir.x, dir.z)
+						rig.rotation.x = lerpf(rig.rotation.x, 0.0, delta * 6.0)
+						# 走路轻微颠簸
+						rig.position.y = base.y + abs(sin(Time.get_ticks_msec() * 0.012 + i * 1.7)) * 0.05
+				3:  # 停歇：飞向栖息点并在其上停留
+					var perch: Vector3 = targets[i]
+					var to_p := perch - rig.position
+					if to_p.length() < 0.25:
+						# 已到栖息点：停在上面（可轻微起伏，像站在枝头）
+						rig.position = perch
+						rig.rotation.x = lerpf(rig.rotation.x, 0.0, delta * 5.0)
+						rig.position.y = perch.y + sin(Time.get_ticks_msec() * 0.004 + i) * 0.03
+					else:
+						# 飞行：抬升 + 朝目标（速度较快，确保能飞到栖息点）
+						var fdir := to_p.normalized()
+						rig.position += fdir * 4.5 * delta
+						rig.rotation.y = atan2(fdir.x, fdir.z)
+						# 飞行时前倾
+						rig.rotation.x = lerpf(rig.rotation.x, -0.25, delta * 5.0)
+
+
+## 为每个物种生成一组会动的个体（最多 10 个/物种），用多几何体拼出可辨识剪影
+func _build_species_views(parent: Node3D) -> void:
+	for sid in GameState.SPECIES:
+		var rigs: Array = []
+		var bases: Array = []
+		var states: Array = []
+		var timers: Array = []
+		var targets: Array = []
+		for i in 10:
+			var rig := Node3D.new()  # 一个物种个体 = 一组几何体
+			rig.name = sid
+			_build_bird_body(rig, sid)
+			rig.visible = false
+			parent.add_child(rig)
+			rigs.append(rig)
+			var base := Vector3(
+				(-7 + i * 1.5) + (sid.length() % 3) * 2.0,
+				0.0,
+				-5 + (i % 4) * 3.0
+			)
+			bases.append(base)
+			states.append(0)
+			timers.append(1.0 + (i % 5) * 0.6)
+			targets.append(base)
+		species_views[sid] = {
+			"rigs": rigs, "bases": bases,
+			"states": states, "timers": timers, "targets": targets,
+		}
+
+
+## 用几何体拼出鸟类剪影（可辨识）
+func _build_bird_body(rig: Node3D, sid: String) -> void:
+	var white := Color(0.96, 0.96, 0.94)
+	var dark := Color(0.35, 0.35, 0.40)
+	var grey := Color(0.78, 0.78, 0.74)
+	var red := Color(0.85, 0.45, 0.42)
+	var yellow := Color(0.95, 0.85, 0.55)
+	var brown := Color(0.72, 0.62, 0.50)
+
+	# 躯干（椭球）
+	var body := MeshInstance3D.new()
+	var bm := SphereMesh.new()
+	bm.radius = 0.28
+	bm.height = 0.6
+	body.mesh = bm
+	body.scale = Vector3(0.8, 0.9, 1.3)
+	body.position = Vector3(0, 0.85, 0)
+	rig.add_child(body)
+
+	# 头
+	var head := MeshInstance3D.new()
+	var hm := SphereMesh.new()
+	hm.radius = 0.16
+	hm.height = 0.34
+	head.mesh = hm
+	head.position = Vector3(0, 1.35, 0.15)
+	rig.add_child(head)
+
+	# 长颈（圆柱，连接头与躯干）
+	var neck := MeshInstance3D.new()
+	var nm := CylinderMesh.new()
+	nm.top_radius = 0.06
+	nm.bottom_radius = 0.08
+	nm.height = 0.55
+	neck.mesh = nm
+	neck.position = Vector3(0, 1.08, 0.05)
+	rig.add_child(neck)
+
+	# 长腿（两根细圆柱）
+	for side in [-1, 1]:
+		var leg := MeshInstance3D.new()
+		var lm := CylinderMesh.new()
+		lm.top_radius = 0.02
+		lm.bottom_radius = 0.02
+		lm.height = 0.55
+		leg.mesh = lm
+		leg.position = Vector3(side * 0.12, 0.35, 0.0)
+		rig.add_child(leg)
+
+	# 喙
+	var beak := MeshInstance3D.new()
+	var bkm := CylinderMesh.new()
+	bkm.top_radius = 0.015
+	bkm.bottom_radius = 0.03
+	bkm.height = 0.2
+	beak.mesh = bkm
+	beak.rotation_degrees = Vector3(90, 0, 0)
+	beak.position = Vector3(0, 1.38, 0.32)
+	rig.add_child(beak)
+
+	# 按物种上色与特殊特征
+	match sid:
+		"baihe":
+			body.material_override = _mat(white)
+			head.material_override = _mat(white)
+			neck.material_override = _mat(white)
+			beak.material_override = _mat(yellow)
+			# 红色裸区（头顶）
+			var crown := MeshInstance3D.new()
+			var crm := SphereMesh.new()
+			crm.radius = 0.07
+			crm.height = 0.15
+			crown.mesh = crm
+			crown.material_override = _mat(red)
+			crown.position = Vector3(0, 1.42, 0.15)
+			rig.add_child(crown)
+			# 黑色翅尖
+			var wing := MeshInstance3D.new()
+			var wm := BoxMesh.new()
+			wm.size = Vector3(0.5, 0.08, 0.3)
+			wing.mesh = wm
+			wing.material_override = _mat(dark)
+			wing.position = Vector3(0, 0.9, -0.35)
+			rig.add_child(wing)
+		"dongfangbaihuan":
+			body.material_override = _mat(white)
+			head.material_override = _mat(white)
+			neck.material_override = _mat(white)
+			beak.material_override = _mat(dark)
+			# 黑色大翅
+			var dwing := MeshInstance3D.new()
+			var dwm := BoxMesh.new()
+			dwm.size = Vector3(0.6, 0.1, 0.5)
+			dwing.mesh = dwm
+			dwing.material_override = _mat(dark)
+			dwing.position = Vector3(0, 0.9, -0.45)
+			rig.add_child(dwing)
+		"xiaotiane":
+			body.material_override = _mat(white)
+			head.material_override = _mat(white)
+			neck.material_override = _mat(white)
+			beak.material_override = _mat(yellow)
+		"baizhenhe":
+			body.material_override = _mat(grey)
+			head.material_override = _mat(grey)
+			neck.material_override = _mat(grey)
+			beak.material_override = _mat(yellow)
+			# 红色脸
+			var face := MeshInstance3D.new()
+			var fsm := SphereMesh.new()
+			fsm.radius = 0.08
+			fsm.height = 0.16
+			face.mesh = fsm
+			face.material_override = _mat(red)
+			face.position = Vector3(0, 1.36, 0.22)
+			rig.add_child(face)
+		"yanlei":
+			body.material_override = _mat(brown)
+			head.material_override = _mat(brown)
+			neck.material_override = _mat(brown)
+			beak.material_override = _mat(yellow)
+
+
+func _mat(c: Color) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = c
+	return m
+
+
+func _update_species_views() -> void:
+	for sid in GameState.SPECIES:
+		var pop: int = GameState.species_pop.get(sid, 0)
+		var count: int = int(pop / 10.0)  # 0-100 → 0-10 个
+		var view: Dictionary = species_views[sid]
+		var rigs: Array = view["rigs"]
+		for i in rigs.size():
+			var rig: Node3D = rigs[i]
+			var should_show := i < count
+			if should_show and not rig.visible:
+				# 新出现的个体：弹性放大登场（TRANS_BACK，有"冒出来"的弹性感）
+				rig.visible = true
+				rig.scale = Vector3(0.01, 0.01, 0.01)
+				var tw := Motion.tween(rig, "linear")
+				Motion.curve(tw, "back.out")
+				tw.tween_property(rig, "scale", Vector3.ONE, 0.4)
+			elif should_show and rig.scale.x < 1.0:
+				# 正在退场又需要显示：立即恢复
+				rig.scale = Vector3.ONE
+			elif not should_show and rig.visible:
+				# 消失的个体：缩小淡出后隐藏（不打断正在进行的退场动画）
+				if rig.scale.x < 0.9:
+					continue
+				var tw2 := Motion.tween(rig, "linear")
+				Motion.curve(tw2, "power2.in")
+				tw2.tween_property(rig, "scale", Vector3(0.01, 0.01, 0.01), 0.25)
+				tw2.tween_callback(func() -> void: rig.visible = false)
+
+
+## 为每种植物生成一组个体（组合模型：根 Node3D + 多个几何体）
+func _build_plant_views(parent: Node3D) -> void:
+	for pid in GameState.PLANTS:
+		var rigs: Array = []
+		var kind: String = GameState.PLANTS[pid]["kind"]
+		for i in 14:
+			var rig := Node3D.new()
+			rig.visible = false
+			_build_plant_model(rig, pid, kind)
+			parent.add_child(rig)
+			rigs.append(rig)
+		plant_views[pid] = {"rigs": rigs, "kind": kind}
+
+
+## 构建植物组合模型（比单几何体更有辨识度）
+func _build_plant_model(rig: Node3D, pid: String, kind: String) -> void:
+	var c: Color = GameState.PLANTS[pid]["color"]
+	match kind:
+		"submerged":
+			# 苦草：水下丛生的带状叶片
+			for k in 5:
+				var leaf := MeshInstance3D.new()
+				var lm := BoxMesh.new()
+				lm.size = Vector3(0.08, 0.7, 0.18)
+				leaf.mesh = lm
+				leaf.material_override = _mat(c)
+				leaf.position = Vector3((k - 2) * 0.11, 0.35, (k % 2) * 0.08)
+				leaf.rotation.z = (k - 2) * 0.12
+				rig.add_child(leaf)
+		"floating":
+			# 莲：圆形浮叶 + 花
+			for k in 3:
+				var pad := MeshInstance3D.new()
+				var pm := CylinderMesh.new()
+				pm.top_radius = 0.32
+				pm.bottom_radius = 0.32
+				pm.height = 0.04
+				pad.mesh = pm
+				pad.material_override = _mat(c)
+				pad.position = Vector3((k - 1) * 0.42, 0.06, (k % 2) * 0.3)
+				rig.add_child(pad)
+			var flower := MeshInstance3D.new()
+			var fm := SphereMesh.new()
+			fm.radius = 0.09
+			fm.height = 0.18
+			flower.mesh = fm
+			flower.material_override = _mat(Color(0.94, 0.80, 0.86))
+			flower.position = Vector3(0, 0.22, 0)
+			rig.add_child(flower)
+		"emergent":
+			# 芦苇：多根细高秆 + 顶部穗
+			for k in 4:
+				var stalk := MeshInstance3D.new()
+				var sm := CylinderMesh.new()
+				sm.top_radius = 0.03
+				sm.bottom_radius = 0.045
+				sm.height = 1.9 + (k % 3) * 0.25
+				stalk.mesh = sm
+				stalk.material_override = _mat(c)
+				stalk.position = Vector3((k - 1.5) * 0.16, (1.9 + (k % 3) * 0.25) / 2.0, (k % 2) * 0.12)
+				rig.add_child(stalk)
+				var tassel := MeshInstance3D.new()
+				var tm := CylinderMesh.new()
+				tm.top_radius = 0.02
+				tm.bottom_radius = 0.07
+				tm.height = 0.32
+				tassel.mesh = tm
+				tassel.material_override = _mat(c.lightened(0.28))
+				tassel.position = Vector3((k - 1.5) * 0.16, 1.9 + (k % 3) * 0.25, (k % 2) * 0.12)
+				rig.add_child(tassel)
+		"tree":
+			# 池杉：树干 + 三层锥形树冠
+			var trunk := MeshInstance3D.new()
+			var trm := CylinderMesh.new()
+			trm.top_radius = 0.09
+			trm.bottom_radius = 0.16
+			trm.height = 1.6
+			trunk.mesh = trm
+			trunk.material_override = _mat(Color(0.55, 0.45, 0.36))
+			trunk.position = Vector3(0, 0.8, 0)
+			rig.add_child(trunk)
+			for layer in 3:
+				var canopy := MeshInstance3D.new()
+				var cm := CylinderMesh.new()
+				var r := 0.85 - layer * 0.22
+				cm.top_radius = 0.02
+				cm.bottom_radius = r
+				cm.height = 0.75
+				canopy.mesh = cm
+				canopy.material_override = _mat(c.lightened(layer * 0.08))
+				canopy.position = Vector3(0, 1.5 + layer * 0.55, 0)
+				rig.add_child(canopy)
+		_:  # marsh 草洲
+			# 草丛：一簇小锥
+			for k in 6:
+				var blade := MeshInstance3D.new()
+				var bm := CylinderMesh.new()
+				bm.top_radius = 0.01
+				bm.bottom_radius = 0.07
+				bm.height = 0.45 + (k % 3) * 0.15
+				blade.mesh = bm
+				blade.material_override = _mat(c.lightened((k % 3) * 0.06))
+				var ang := k * 1.05
+				blade.position = Vector3(cos(ang) * 0.14, (0.45 + (k % 3) * 0.15) / 2.0, sin(ang) * 0.14)
+				blade.rotation.z = cos(ang) * 0.22
+				blade.rotation.x = sin(ang) * 0.22
+				rig.add_child(blade)
+
+
+func _update_plant_views() -> void:
+	_ensure_plant_positions()
+	for pid in GameState.PLANTS:
+		var pop: int = GameState.plant_pop.get(pid, 0)
+		var count: int = int(pop / 7.0)  # 0-100 → 0-14
+		var view: Dictionary = plant_views[pid]
+		var rigs: Array = view["rigs"]
+		var kind: String = view["kind"]
+		for i in rigs.size():
+			var rig: Node3D = rigs[i]
+			var should_show := i < count
+			if should_show and not rig.visible:
+				# 生长动画：从地面纵向"长出来"（高度 0→1 + 轻微过冲）
+				rig.visible = true
+				rig.position = _plant_position(pid, kind, i)
+				rig.scale = Vector3(1.0, 0.01, 1.0)
+				var tw := Motion.tween(rig, "linear")
+				Motion.curve(tw, "back.out")
+				tw.tween_property(rig, "scale", Vector3.ONE, 0.55).set_delay(Motion.stagger("enter", i))
+			elif should_show:
+				# 已在显示：确保缩放正确（防止动画被打断后残留小尺寸）
+				if rig.scale.y < 0.95:
+					rig.scale = Vector3.ONE
+					rig.position = _plant_position(pid, kind, i)
+			elif not should_show and rig.visible:
+				# 消退：纵向缩回地面
+				var tw2 := Motion.tween(rig, "linear")
+				Motion.curve(tw2, "power2.in")
+				tw2.tween_property(rig, "scale", Vector3(1.0, 0.01, 1.0), 0.3)
+				tw2.tween_callback(func() -> void: rig.visible = false)
+
+
+func _plant_position(pid: String, _kind: String, i: int) -> Vector3:
+	var pts: Array = plant_positions.get(pid, [])
+	if i < pts.size():
+		return pts[i]
+	return Vector3.ZERO
+
+
+## 每局按种子随机散落植物位置：打破原来的成排成条网格，改为自然散布
+func _ensure_plant_positions() -> void:
+	if _plant_pos_seed == GameState.run_seed:
+		return
+	_plant_pos_seed = GameState.run_seed
+	var rng := RandomNumberGenerator.new()
+	rng.seed = GameState.run_seed
+	for pid in GameState.PLANTS:
+		var kind: String = GameState.PLANTS[pid]["kind"]
+		var pts: Array = []
+		for i in 14:
+			pts.append(_scatter_plant(kind, pts, rng))
+		plant_positions[pid] = pts
+
+
+## 在各自生境区域内随机取点，同类之间保持最小间距，避免叠成一团
+func _scatter_plant(kind: String, placed: Array, rng: RandomNumberGenerator) -> Vector3:
+	for attempt in 40:
+		var p := _plant_zone_point(kind, rng)
+		var ok := true
+		for q in placed:
+			if p.distance_to(q) < 1.4:
+				ok = false
+				break
+		if ok:
+			return p
+	return _plant_zone_point(kind, rng)
+
+
+## 各植物的生境区域（沿用原分布范围，仅把固定网格改为随机取点）
+func _plant_zone_point(kind: String, rng: RandomNumberGenerator) -> Vector3:
+	match kind:
+		"submerged":  # 苦草：水下浅水区
+			return Vector3(rng.randf_range(-6.0, 6.0), 0.0, rng.randf_range(-2.0, 3.0))
+		"floating":   # 莲/荷叶：开阔水面
+			return Vector3(rng.randf_range(2.0, 12.0), 0.06, rng.randf_range(-4.0, 1.0))
+		"emergent":   # 芦苇：岸边浅滩
+			return Vector3(rng.randf_range(-9.0, 6.6), 0.5, rng.randf_range(3.0, 5.5))
+		"tree":       # 乔木：岸线 / 草洲外围
+			return Vector3(rng.randf_range(-13.0, 11.0), 0.0, rng.randf_range(-12.0, -6.8))
+		_:            # 草洲
+			return Vector3(rng.randf_range(-8.0, 6.4), 0.05, rng.randf_range(5.0, 7.4))
+
+
+func _build_wetland() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "WetlandLayer"
+	layer.layer = -5
+	add_child(layer)
+	wetland = PixelWetland.new()
+	wetland.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.add_child(wetland)
+	get_node("../Ground").hide()
+
+
+func _update_3d() -> void:
+	# Keep the existing signal and score-animation boundary; presentation is read-only.
+	if not _score_animating and wetland:
+		wetland.sync_state()
+
+
+# ==================== UI ====================
+func _build_ui() -> void:
+	var canvas := CanvasLayer.new()
+	canvas.name = "UICanvas"
+	add_child(canvas)
+	var scrim := ColorRect.new()
+	scrim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scrim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var shader := Shader.new()
+	shader.code = "shader_type canvas_item; void fragment(){ float a = smoothstep(0.57, 1.0, UV.y) * 0.72 + (1.0-smoothstep(0.0, 0.16, UV.y))*0.32; COLOR = vec4(0.16, 0.21, 0.25, a); }"
+	var material := ShaderMaterial.new()
+	material.shader = shader
+	scrim.material = material
+	canvas.add_child(scrim)
+
+
+	# --- 左侧：时间 / 金钱 / 事件（收窄为竖条，把沙盘让出来）---
+	left_panel = PanelContainer.new()
+	left_panel.anchor_left = 0.0
+	left_panel.anchor_top = 0.0
+	left_panel.anchor_right = 0.0
+	left_panel.anchor_bottom = 0.0
+	left_panel.offset_left = 18
+	left_panel.offset_right = 222
+	left_panel.offset_top = 18
+	# 190 → 240：季节行从一行 Label 变成「指针表盘 + 两行文字」，行高多出约 34px；
+	# 再留一点余量给「本局天赋」最多 3 条词条的情况。
+	left_panel.offset_bottom = 240
+	_panel_style(left_panel, Color(0.20, 0.14, 0.09, 0.60))
+	canvas.add_child(left_panel)
+
+	var lv := VBoxContainer.new()
+	lv.add_theme_constant_override("separation", 10)
+	left_panel.add_child(lv)
+
+	var title := _make_label("湿地守护站", 20, VisualTheme.GOLD)
+	lv.add_child(title)
+
+	turn_label = _make_label("第 1 / 16 回合", 17, Color(1, 1, 1))
+	lv.add_child(turn_label)
+	# 季节行 = [指针表盘] + [第 X 年 · 春] / [季节旁白]
+	var season_row := HBoxContainer.new()
+	season_row.add_theme_constant_override("separation", 6)
+	season_dial = SeasonDial.new()
+	season_dial.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	season_row.add_child(season_dial)
+	var season_text := VBoxContainer.new()
+	season_text.add_theme_constant_override("separation", 2)
+	season_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	season_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	season_label = _make_label("第 1 年 · 春", 14, Color(0.82, 0.86, 0.9))
+	season_text.add_child(season_label)
+	season_tagline = _make_label("", 12, Color(0.68, 0.78, 0.72))
+	season_tagline.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	season_text.add_child(season_tagline)
+	season_row.add_child(season_text)
+	lv.add_child(season_row)
+
+	var sep1 := HSeparator.new()
+	lv.add_child(sep1)
+
+	var spent_row := HBoxContainer.new()
+	spent_row.add_theme_constant_override("separation", 6)
+	spent_row.add_child(_make_art_icon(ICON_COIN_SPENT))
+	spent_label = _make_label("已消耗：0 万", 12, Color(0.82, 0.86, 0.9))
+	spent_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	spent_row.add_child(spent_label)
+	lv.add_child(spent_row)
+
+	var funds_row := HBoxContainer.new()
+	funds_row.add_theme_constant_override("separation", 6)
+	# 34 高：可见的金币实体约 21px，和右边 24 号金色大字一样高（1:1 只有 14px，偏小）
+	funds_icon = _make_art_icon(ICON_COIN, 34.0)
+	_attach_poke(funds_icon, 1.15)     # 指标图标 14px 才能放 1.35；这个 34px，放大要收着点
+	funds_row.add_child(funds_icon)
+	# ⚠ 必须写 24：_snap_px() 只认 12 的倍数，写 17 / 18 都会被吸附回 12px，
+	#   改完看不出一丁点变大（原来的 17 就是这么被吃掉的）。
+	funds_label = _make_label("0 / 80 万", 24, Color(1, 0.95, 0.6))
+	funds_label.tooltip_text = "本回合已用及待付/ 本回合总预算"
+	funds_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	funds_row.add_child(funds_label)
+	lv.add_child(funds_row)
+
+	var research_row := HBoxContainer.new()
+	research_row.add_theme_constant_override("separation", 6)
+	research_icon = _make_art_icon(ICON_RESEARCH)
+	_attach_poke(research_icon, 1.25)
+	research_row.add_child(research_icon)
+	research_label = _make_label("科研点：0", 14, Color(0.82, 0.9, 1))
+	research_label.tooltip_text = _research_tooltip()
+	research_icon.tooltip_text = research_label.tooltip_text
+	research_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	research_row.add_child(research_label)
+	lv.add_child(research_row)
+
+	# --- 本局天赋：常驻在资金栏最下面 ---
+	# 每局开局随机 0~3 条（见 talents.gd roll_for_run），这里只做展示；
+	# 显示口径与开局弹窗一致：词条名 + 效果，右边对齐（和上面几行同样的排版习惯）。
+	lv.add_child(HSeparator.new())
+	lv.add_child(_make_label("本局天赋", 13, Color(0.9, 0.86, 0.72)))
+	talents_row = VBoxContainer.new()
+	talents_row.add_theme_constant_override("separation", 3)
+	lv.add_child(talents_row)
+	_refresh_run_talents()
+
+	# --- 右侧：六项指标（收窄为竖条）---
+	right_panel = PanelContainer.new()
+	right_panel.anchor_left = 1.0
+	right_panel.anchor_top = 0.0
+	right_panel.anchor_right = 1.0
+	right_panel.anchor_bottom = 0.0
+	right_panel.offset_left = -210
+	right_panel.offset_right = -18
+	right_panel.offset_top = 18
+	right_panel.offset_bottom = 266
+	_panel_style(right_panel, Color(0.20, 0.14, 0.09, 0.60))
+	canvas.add_child(right_panel)
+
+	# ★ 在这里就把两块侧栏的「原位」登记好。
+	#   _slide_main_ui() 复位靠的是 _ui_slide_origin，而它是**惰性捕获**的
+	#   （if not _ui_slide_origin.has(c) 才记）。若玩家恰好在侧栏滑入/滑出的
+	#   0.35s tween 途中第一次打开牌库，捕获到的就是半路的中间值 ——
+	#   而且**一旦记错就永久错**，之后每次开合牌库都会把面板复位到那个错位置。
+	#   滑动行程有 200+ px，点到 tween 中段能错出上百像素。
+	#   搭建时的这两个 offset 就是设计好的常驻位置，是唯一可靠的「原位」来源。
+	#   （只登记这两块：_slide_side_panels() 也在改它们的 offset，是冲突的来源；
+	#     其余控件没有第二个函数去动，惰性捕获不会出问题。）
+	_ui_slide_origin[left_panel] = [left_panel.offset_left, left_panel.offset_top,
+			left_panel.offset_right, left_panel.offset_bottom]
+	_ui_slide_origin[right_panel] = [right_panel.offset_left, right_panel.offset_top,
+			right_panel.offset_right, right_panel.offset_bottom]
+
+	var rv := VBoxContainer.new()
+	rv.add_theme_constant_override("separation", 10)
+	right_panel.add_child(rv)
+	var r_title := _make_label("生态监测", 24, VisualTheme.MINT)
+	rv.add_child(r_title)
+	for metric in GameState.METRIC_NAMES:
+		rv.add_child(_make_metric_row(metric))
+	_build_staged_board(canvas)
+
+	# 顶部提示完整换行；牌桌自动让到提示下方。
+	event_label = _make_label("暂无", 13, Color(0.95, 0.95, 0.92))
+	event_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	event_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	event_label.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	event_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	event_label.anchor_left = 0.0
+	event_label.anchor_top = 0.0
+	event_label.anchor_right = 1.0
+	event_label.offset_left = 240
+	event_label.offset_right = -222
+	event_label.offset_top = 18
+	event_label.offset_bottom = 52
+	event_label.resized.connect(_layout_event_banner)
+	event_label.add_theme_color_override("font_outline_color", Color(0.05, 0.08, 0.06, 0.8))
+	event_label.add_theme_constant_override("outline_size", 5)
+	canvas.add_child(event_label)
+
+	# --- 底部中间：手牌（无背景框，卡牌直接浮在沙盘上）---
+	hand_panel = PanelContainer.new()
+	hand_panel.anchor_left = 0.5
+	hand_panel.anchor_top = 1.0
+	hand_panel.anchor_right = 0.5
+	hand_panel.anchor_bottom = 1.0
+	hand_panel.offset_left = -330
+	hand_panel.offset_right = 330
+	hand_panel.offset_top = -290
+	hand_panel.offset_bottom = -4
+	# 透明无边框：手牌区域不遮挡沙盘
+	var empty_sb := StyleBoxEmpty.new()
+	hand_panel.add_theme_stylebox_override("panel", empty_sb)
+	hand_panel.visible = false
+	canvas.add_child(hand_panel)
+
+	var hv := VBoxContainer.new()
+	hv.add_theme_constant_override("separation", 6)
+	hand_panel.add_child(hv)
+
+	# 牌区（扇形手牌，手动定位，无背景）
+	card_box = Control.new()
+	card_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	card_box.custom_minimum_size = Vector2(0, 200)
+	card_box.mouse_filter = Control.MOUSE_FILTER_PASS
+	card_box.resized.connect(_on_card_box_resized)
+	hv.add_child(card_box)
+	# Prompt above the fan while a card is dragged; ignore input so it cannot block drops.
+	drag_play_hint = _make_label("松手落到桌面", 15, Color("a8f0c1"))
+	drag_play_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	drag_play_hint.add_theme_color_override("font_outline_color", Color(0.03, 0.08, 0.06, 0.95))
+	drag_play_hint.add_theme_constant_override("outline_size", 5)
+	drag_play_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	drag_play_hint.z_as_relative = false
+	drag_play_hint.z_index = 2000
+	drag_play_hint.visible = false
+	canvas.add_child(drag_play_hint)
+
+	# 右下角仅保留操作按钮，预算统一在左侧大金额显示。
+	bottom_right = VBoxContainer.new()
+	bottom_right.anchor_left = 1.0
+	bottom_right.anchor_top = 1.0
+	bottom_right.anchor_right = 1.0
+	bottom_right.anchor_bottom = 1.0
+	# Text can increase the VBox minimum size (queue count, budget, error hints).
+	# Grow toward the playfield, keeping the right and bottom screen margins fixed.
+	bottom_right.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	bottom_right.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	bottom_right.offset_left = -210
+	bottom_right.offset_right = -18
+	# 预警回顾与四个操作按钮使用紧凑高度，必要时向上扩展。
+	# ⚠ 容器装不下时 Godot 会保 offset_top 而向下长，底部按钮会被顶出屏幕。
+	bottom_right.offset_top = -190
+	bottom_right.offset_bottom = -14
+	_ui_slide_origin[bottom_right] = [-210.0, -190.0, -18.0, -14.0]
+	bottom_right.add_theme_constant_override("separation", 4)
+	bottom_right.visible = false
+	canvas.add_child(bottom_right)
+
+	selected_label = _make_label("", 14, Color(1, 0.9, 0.5))
+	selected_label.visible = false
+	selected_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	selected_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	selected_label.custom_minimum_size.y = 30
+	selected_label.add_theme_color_override("font_outline_color", Color(0.05, 0.08, 0.06, 0.8))
+	selected_label.add_theme_constant_override("outline_size", 4)
+	bottom_right.add_child(selected_label)
+
+	# 文案不写死：_build_ui 在 _ready 里就跑完了，那时玩家还没选难度。
+	# 实际文字由 _update_hud() 按 GameState.action_slots() 填。
+	action_hint = _make_label("", 12, Color(0.92, 0.94, 0.96))
+	action_hint.visible = false
+	action_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	action_hint.add_theme_color_override("font_outline_color", Color(0.05, 0.08, 0.06, 0.8))
+	action_hint.add_theme_constant_override("outline_size", 4)
+	bottom_right.add_child(action_hint)
+
+	# 出牌阶段的排序按钮：与牌库那个共用 _deck_sort_by_category 和同一套冷却，
+	# 所以两边永远同步 —— 在牌库切过再回来，手牌也是同一套规则，
+	# 新一局发牌同样按它排（见 _build_hand_panel）。
+	hand_sort_btn = _make_button("按类别排序", _toggle_hand_sort, 14)
+	hand_sort_btn.custom_minimum_size = Vector2(166, 32)
+	bottom_right.add_child(hand_sort_btn)
+
+	# 两个「花钱换牌」的容错阀（都在结束回合之上）：
+	#   紧急调度 = 花 40 万从当季池点名一张牌，不占行动位，回合末与手牌一起结算
+	#   刷新手牌 = 花 5 万把整手重抽一遍，每回合限一次
+	dispatch_btn = _make_button("紧急调度 · 40 万", _open_dispatch_panel, 14)
+	dispatch_btn.custom_minimum_size = Vector2(166, 32)
+	bottom_right.add_child(dispatch_btn)
+
+	refresh_btn = _make_button("刷新手牌 · 5 万", _on_refresh_hand, 14)
+	refresh_btn.custom_minimum_size = Vector2(166, 32)
+	bottom_right.add_child(refresh_btn)
+
+	end_turn_btn = _make_button("执行行动 ▶", _finish_turn, 20)
+	VisualTheme.style_button(end_turn_btn, false, true)
+	end_turn_btn.custom_minimum_size = Vector2(166, 44)
+	bottom_right.add_child(end_turn_btn)
+
+	# 左下角：出牌档位拉杆（向左拨 = 基础投入，中间 = 有效投入，向右拨 = 深度投入）
+	_build_tier_lever(canvas)
+
+	# --- 弹窗（顶层）---
+	popup_root = Control.new()
+	popup_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	popup_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	popup_root.visible = false
+	canvas.add_child(popup_root)
+
+	dim = ColorRect.new()
+	dim.color = Color(0.015, 0.055, 0.065, 0.72)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	popup_root.add_child(dim)
+
+	popup_center = CenterContainer.new()
+	popup_center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	popup_center.mouse_filter = Control.MOUSE_FILTER_PASS
+	popup_root.add_child(popup_center)
+
+	popup_panel = PanelContainer.new()
+	popup_panel.custom_minimum_size = Vector2(600, 0)
+	_panel_style(popup_panel, Color(0.24, 0.17, 0.11, 0.55))
+	popup_center.add_child(popup_panel)
+
+	var pv := VBoxContainer.new()
+	pv.add_theme_constant_override("separation", 12)
+	popup_panel.add_child(pv)
+	popup_title = _make_label("", 22, Color(1, 0.9, 0.55))
+	pv.add_child(popup_title)
+	popup_content = BoxContainer.new()
+	popup_content.vertical = true
+	popup_content.add_theme_constant_override("separation", 20)
+	pv.add_child(popup_content)
+	popup_photo_frame = PanelContainer.new()
+	popup_photo_frame.name = "KnowledgeDropPhoto"
+	var photo_style := StyleBoxFlat.new()
+	photo_style.bg_color = Color("e9e5d3")
+	photo_style.border_color = Color("c9d7be")
+	photo_style.set_border_width_all(1)
+	photo_style.set_corner_radius_all(4)
+	photo_style.set_content_margin_all(6)
+	popup_photo_frame.add_theme_stylebox_override("panel", photo_style)
+	popup_photo_frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	popup_photo_frame.hide()
+	popup_content.add_child(popup_photo_frame)
+	popup_photo = TextureRect.new()
+	popup_photo.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	popup_photo.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	popup_photo.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	popup_photo.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	popup_photo_frame.add_child(popup_photo)
+	popup_body = RichTextLabel.new()
+	popup_body.bbcode_enabled = true
+	popup_body.fit_content = true
+	popup_body.custom_minimum_size = Vector2(540, 0)
+	popup_body.add_theme_font_size_override("normal_font_size", _snap_px(16))
+	popup_body.add_theme_color_override("default_color", Color(0.95, 0.95, 0.95))
+	popup_content.add_child(popup_body)
+	popup_button = _make_button("继续", _on_popup_button, 18)
+	popup_button.custom_minimum_size = Vector2(0, 44)
+	pv.add_child(popup_button)
+	get_viewport().size_changed.connect(_layout_knowledge_popup)
+
+	# 主菜单（独立 CanvasLayer，盖在 HUD 与沙盘之上）
+	_build_menu()
+	_build_record_demo_button()
+	_build_pause_menu()
+	_build_crisis_alert()
+	_build_warn_history(canvas)
+	_build_deck_ui(canvas)
+	_build_deck_viewer()
+	_build_knowledge_viewer()
+	_build_metric_tip(canvas)   # 最后加：小窗要画在 HUD 所有面板之上
+	_build_score_layer()        # 算分动画层：独立 CanvasLayer，盖在 HUD 之上
+	_build_achievement_popup()  # 成就解锁提示层：盖在最上面
+	sandpan_view = preload("res://scripts/sandpan_view.gd").new()
+	add_child(sandpan_view)
+	sandpan_view.configure(self, canvas)
+
+
+## 算分动画层。独立 CanvasLayer(layer=7)：盖在 UICanvas(0) 之上，
+## 又低于牌库查看器(8) / 主菜单(10) / 暂停(20) / 开场(30)，遮挡关系正确。
+## 该层 transform 是单位阵、与主 canvas 同坐标系，所以可以直接用
+## metric_bars[...]["row"].get_global_rect() 定位小票，不必做坐标换算。
+func _build_score_layer() -> void:
+	var impact_layer := CanvasLayer.new()
+	impact_layer.name = "ImpactLayer"
+	impact_layer.layer = 8
+	add_child(impact_layer)
+	impact_feedback = preload("res://scripts/impact_feedback.gd").new()
+	impact_layer.add_child(impact_feedback)
+	score_layer = CanvasLayer.new()
+	score_layer.name = "ScoreLayer"
+	score_layer.layer = 7
+	score_layer.visible = false
+	add_child(score_layer)
+
+	score_stage = Control.new()
+	score_stage.name = "Stage"
+	score_stage.set_anchors_preset(Control.PRESET_FULL_RECT)
+	score_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	score_layer.add_child(score_stage)
+
+	score_floats = Control.new()
+	score_floats.name = "Floats"
+	score_floats.set_anchors_preset(Control.PRESET_FULL_RECT)
+	score_floats.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	score_layer.add_child(score_floats)
+
+	# 算分小票：整场动画复用同一个节点，逐项滑到当前指标行的左侧
+	score_receipt = PanelContainer.new()
+	score_receipt.name = "Receipt"
+	score_receipt.visible = false
+	score_receipt.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_panel_style(score_receipt, Color(0.14, 0.10, 0.07, 0.94))
+	score_layer.add_child(score_receipt)
+	score_receipt_box = VBoxContainer.new()
+	score_receipt_box.add_theme_constant_override("separation", 2)
+	score_receipt.add_child(score_receipt_box)
+
+
+# ==================== 主菜单 ====================
+## 录制副本专用：开始页右下角一个「录制演示」按钮，点一下切到 demo 场景自动跑分镜。
+## 只存在于录屏副本里，主工程没有这一段。
+func _build_record_demo_button() -> void:
+	var b := _make_button("录制演示 ▶", _on_record_demo_pressed, 20)
+	b.name = "RecordDemoButton"
+	b.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	b.offset_left = -296.0
+	b.offset_top = -110.0
+	b.offset_right = -56.0
+	b.offset_bottom = -56.0
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	VisualTheme.style_button(b, false, true)
+	menu_root.add_child(b)
+	var tip := _make_label("点这里自动跑 3 分 12 秒演示", 13, Color(0.24, 0.22, 0.14, 0.9))
+	tip.name = "RecordDemoHint"
+	tip.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	tip.offset_left = -430.0
+	tip.offset_top = -136.0
+	tip.offset_right = -56.0
+	tip.offset_bottom = -112.0
+	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	menu_root.add_child(tip)
+	# 打开设置/知识卡等面板时 menu_col 会收起，按钮跟着收，免得浮在面板上。
+	# 用命名方法而不是 lambda：demo 场景里按钮会被 queue_free，lambda 捕获到已释放
+	# 的节点会在每次菜单显隐时刷一串 "Lambda capture was freed"。
+	menu_col.visibility_changed.connect(_sync_record_demo_visibility)
+
+
+
+func _sync_record_demo_visibility() -> void:
+	if menu_root == null:
+		return
+	for n in menu_root.get_children():
+		if str(n.name).begins_with("RecordDemo"):
+			n.visible = menu_col.visible
+
+
+func _on_record_demo_pressed() -> void:
+	# 给导演脚本留个标记：这次是从按钮进来的，跑完要回开始页；命令行 --write-movie 录片时没有这个标记。
+	get_tree().set_meta("demo_from_button", true)
+	get_tree().change_scene_to_file("res://scenes/demo.tscn")
+
+
+func _build_menu() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "MenuLayer"
+	layer.layer = 10  # 确保在 HUD 之上
+	add_child(layer)
+
+	menu_root = Control.new()
+	menu_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	layer.add_child(menu_root)
+
+	# 很淡的压暗：镜头拉远后沙盘全景仍然看得见，开始页不遮景
+	var bg := ColorRect.new()
+	bg.color = Color.WHITE
+	var shade := Shader.new()
+	bg.name = "MenuShade"
+	shade.code = "shader_type canvas_item; void fragment(){ float a = 0.78 * (1.0 - smoothstep(0.12, 0.40, UV.x)); COLOR = vec4(0.16, 0.21, 0.25, a); }"
+	var shade_mat := ShaderMaterial.new()
+	shade_mat.shader = shade
+	bg.material = shade_mat
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_root.add_child(bg)
+
+	# --- 左上角：标题 ---
+	var title := _make_label("鄱阳归翎-生态修复手记", 32, VisualTheme.GOLD)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	title.anchor_left = 0.0
+	title.anchor_right = 0.0
+	title.offset_left = 64.0
+	title.offset_right = 620.0
+	title.offset_top = 64.0
+	title.offset_bottom = 140.0
+	# 大标题风格化成「Minecraft 大标题」那种块状点阵字：用项目自带的缝合像素字体，
+	# 字号仍是 _snap_px(32)=36px（12px 设计格的整数 3 倍，笔画不缺角），
+	# 位置与占位尺寸一行都没动；颜色仍是原来的 GOLD。
+	var title_font := _big_title_font()
+	if title_font != null:
+		title.add_theme_font_override("font", title_font)
+	# 硬投影往右下偏 + 深色描边 = 方块字的厚度感（不做模糊阴影）
+	title.add_theme_color_override("font_shadow_color", VisualTheme.INK)
+	title.add_theme_constant_override("shadow_offset_x", 4)
+	title.add_theme_constant_override("shadow_offset_y", 4)
+	title.add_theme_color_override("font_outline_color", Color("1a1206"))
+	title.add_theme_constant_override("outline_size", 4)
+	menu_root.add_child(title)
+	preload("res://scripts/motion_parallax.gd").attach(title, 2.0)
+	var eyebrow := _make_label("P O Y A N G   /   W E T L A N D S", 12, VisualTheme.MINT)
+	eyebrow.position = Vector2(68, 44)
+	menu_root.add_child(eyebrow)
+	preload("res://scripts/motion_parallax.gd").attach(eyebrow, 7.0)
+	var subtitle := _make_label("一湖清水，万物共生。", 24, VisualTheme.PAPER)
+	subtitle.position = Vector2(68, 150)
+	menu_root.add_child(subtitle)
+	preload("res://scripts/motion_parallax.gd").attach(subtitle, 4.0)
+	var description := _make_label("生态保护 · 卡牌策略 · 四季之旅", 12, VisualTheme.MINT)
+	description.position = Vector2(68, 194)
+	menu_root.add_child(description)
+	var reeds := preload("res://scripts/motion_reeds.gd").new()
+	reeds.name = "MotionReeds"
+	reeds.position = Vector2(68, 220)
+	reeds.size = Vector2(300, 36)
+	menu_root.add_child(reeds)
+	var footer := _make_label("守护每一片芦苇，等待每一次归来。", 12, VisualTheme.PAPER)
+	footer.anchor_top = 1.0
+	footer.anchor_bottom = 1.0
+	footer.offset_left = 68
+	footer.offset_top = -52
+	footer.offset_bottom = -20
+	menu_root.add_child(footer)
+
+	# --- 居中容器：留给技能树（天赋树）面板 ---
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	menu_root.add_child(center)
+
+	# --- 左下角：选项列（逐级展开：主选项 → 难度 → 种子）---
+	menu_col = VBoxContainer.new()
+	menu_col.anchor_left = 0.0
+	menu_col.anchor_right = 0.0
+	menu_col.anchor_top = 0.0
+	menu_col.anchor_bottom = 1.0
+	menu_col.offset_left = 68.0
+	menu_col.offset_right = 388.0
+	menu_col.offset_top = 270.0
+	menu_col.offset_bottom = -82.0
+	menu_col.alignment = BoxContainer.ALIGNMENT_BEGIN
+	menu_col.add_theme_constant_override("separation", 10)
+	menu_root.add_child(menu_col)
+
+	# 一级：新游戏 / 继续游戏
+	menu_start_btn = _make_button("开启守护之旅  ▶", _on_title_start, 26)
+	VisualTheme.style_button(menu_start_btn, false, true)
+	menu_start_btn.custom_minimum_size = Vector2(0, 54)
+	menu_col.add_child(menu_start_btn)
+
+	menu_continue_btn = _make_button("继续游戏", _on_continue_pressed, 22)
+	menu_continue_btn.custom_minimum_size = Vector2(0, 50)
+	menu_continue_btn.visible = false
+	menu_col.add_child(menu_continue_btn)
+
+	# 二级：难度（点「开始」后出现在它正下方）
+	# 四个按钮共用 _on_difficulty_pick，用 bind 把难度值传进去 ——
+	# 之前是四个近乎一样的处理函数，加噩梦档时就得再抄一份，容易漂移。
+	menu_easy_btn = _make_button("简单模式", _on_difficulty_pick.bind(GameState.Difficulty.EASY), 20)
+	menu_easy_btn.custom_minimum_size = Vector2(0, 46)
+	menu_easy_btn.visible = false
+	menu_col.add_child(menu_easy_btn)
+
+	menu_normal_btn = _make_button("普通模式", _on_difficulty_pick.bind(GameState.Difficulty.NORMAL), 20)
+	menu_normal_btn.custom_minimum_size = Vector2(0, 46)
+	menu_normal_btn.visible = false
+	menu_col.add_child(menu_normal_btn)
+
+	menu_hard_btn = _make_button("困难模式", _on_difficulty_pick.bind(GameState.Difficulty.HARD), 20)
+	menu_hard_btn.custom_minimum_size = Vector2(0, 46)
+	menu_hard_btn.visible = false
+	menu_col.add_child(menu_hard_btn)
+
+	# 噩梦档：照搬早期困难档的参数（开局就离死 3~5 点），几乎必死。
+	# 按钮用暗红 danger 样式，与另外三档在视觉上分开。
+	menu_nightmare_btn = _make_button("噩梦模式", _on_difficulty_pick.bind(GameState.Difficulty.NIGHTMARE), 20, true)
+	menu_nightmare_btn.custom_minimum_size = Vector2(0, 46)
+	menu_nightmare_btn.visible = false
+	menu_col.add_child(menu_nightmare_btn)
+
+	# 三级：填写种子
+	menu_mode_label = _make_label("模式：简单", 14, Color(0.82, 0.86, 0.9))
+	menu_mode_label.visible = false
+	menu_col.add_child(menu_mode_label)
+
+	menu_seed_label = _make_label("留空或 0 则随机", 14, Color(0.9, 0.92, 0.94))
+	menu_seed_label.visible = false
+	menu_col.add_child(menu_seed_label)
+
+	seed_input = LineEdit.new()
+	seed_input.add_theme_font_size_override("font_size", _snap_px(18))
+	seed_input.custom_minimum_size = Vector2(0, 42)
+	seed_input.placeholder_text = "种子"
+	seed_input.add_theme_color_override("font_placeholder_color", Color(0.85, 0.88, 0.90, 0.35))
+	seed_input.visible = false
+	menu_col.add_child(seed_input)
+
+	menu_hint = _make_label("", 12, Color(1, 0.6, 0.5))
+	menu_col.add_child(menu_hint)
+
+	menu_seed_start_btn = _make_button("出发，鄱阳湖  ▶", _on_start_pressed, 22)
+	VisualTheme.style_button(menu_seed_start_btn, false, true)
+	menu_seed_start_btn.custom_minimum_size = Vector2(0, 50)
+	menu_seed_start_btn.visible = false
+	menu_col.add_child(menu_seed_start_btn)
+
+	# 返回上一层（难度 / 种子环节可见）
+	menu_back_btn = _make_button("返回", _on_menu_back, 16)
+	menu_back_btn.custom_minimum_size = Vector2(0, 38)
+	menu_back_btn.visible = false
+	menu_col.add_child(menu_back_btn)
+
+	# 主行动在上，收藏与设置以两列排列，退出单独留在底部。
+	menu_separator = HSeparator.new()
+	menu_separator.custom_minimum_size.y = 10
+	menu_col.add_child(menu_separator)
+	menu_utilities = GridContainer.new()
+	menu_utilities.columns = 2
+	menu_utilities.add_theme_constant_override("h_separation", 10)
+	menu_utilities.add_theme_constant_override("v_separation", 10)
+	menu_col.add_child(menu_utilities)
+	if TALENT_TREE_ENABLED:
+		menu_talent_btn = _make_button("天赋树", _show_talent_panel, 18)
+		menu_talent_btn.custom_minimum_size = Vector2(0, 44)
+		menu_utilities.add_child(menu_talent_btn)
+
+	menu_settings_btn = _make_button("设置", _show_settings_panel, 18)
+	menu_settings_btn.custom_minimum_size = Vector2(0, 44)
+	menu_utilities.add_child(menu_settings_btn)
+
+	# 「制作人员」已移入设置面板（见下面的 svb），不在这里建 ——
+	# 主菜单列少这个按钮，底部才不会溢出屏幕。
+	menu_achievements_btn = _make_button("成就", _show_achievements_panel, 18)
+	menu_achievements_btn.custom_minimum_size = Vector2(0, 44)
+	# 入口图标：像素小金牌。**不挂在 Button.icon 上** —— Button 会把图标宽度算进
+	# 「图标+文字」整体居中，结果「成就」两个字相对「技能树/设置/退出」右移约 14px
+	# （2026-09-28 截图实测）。改成在按钮内部左侧贴一个独立图标（不吃布局），
+	# 文字就与其它按钮完全同心。
+	# 图标换成美术交付的金色勋章（裁掉透明留白 + 等比缩放，见 _make_menu_entry_icon）。
+	# 外框 26×26、贴左边 8px：按钮文字是靠中线居中排的，「成就」两字从 x≈72 起，
+	# 离图标右边缘还有 38px，压不到字上。
+	var ach_icon := _make_menu_entry_icon(MENU_ACHIEVEMENTS_ICON, 26)
+	ach_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ach_icon.anchor_left = 0.0
+	ach_icon.anchor_top = 0.5
+	ach_icon.anchor_right = 0.0
+	ach_icon.anchor_bottom = 0.5
+	ach_icon.offset_left = 8
+	ach_icon.offset_right = 34
+	ach_icon.offset_top = -13
+	ach_icon.offset_bottom = 13
+	menu_achievements_btn.add_child(ach_icon)
+	menu_utilities.add_child(menu_achievements_btn)
+
+	# 「知识卡」：与成就同样在按钮内左侧贴一个独立图标（不挂 Button.icon，
+	# 避免图标宽度被算进「图标+文字」的整体居中而让文字偏移）。
+	menu_knowledge_btn = _make_button("知识卡", _show_knowledge_panel, 18)
+	menu_knowledge_btn.custom_minimum_size = Vector2(0, 44)
+	# 同上：知识卡换成美术交付的木框卡片，外框尺寸与成就入口一致。
+	var kn_icon := _make_menu_entry_icon(MENU_KNOWLEDGE_ICON, 26)
+	kn_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	kn_icon.anchor_left = 0.0
+	kn_icon.anchor_top = 0.5
+	kn_icon.anchor_right = 0.0
+	kn_icon.anchor_bottom = 0.5
+	kn_icon.offset_left = 8
+	kn_icon.offset_right = 34
+	kn_icon.offset_top = -13
+	kn_icon.offset_bottom = 13
+	menu_knowledge_btn.add_child(kn_icon)
+	menu_utilities.add_child(menu_knowledge_btn)
+	menu_utilities.move_child(menu_knowledge_btn, 0)
+	menu_utilities.move_child(menu_achievements_btn, 1)
+	for utility in menu_utilities.get_children():
+		utility.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+
+	menu_quit_btn = _make_button("退出", _on_menu_quit, 18)
+	menu_quit_btn.custom_minimum_size = Vector2(0, 40)
+	menu_col.add_child(menu_quit_btn)
+
+	# --- 右上角：鄱阳湖照片条（可左右切换 / 点图放大看原图并标出处）---
+	# 显隐跟着 menu_col 走：设置/成就/制作人员…任何面板打开时都会把 menu_col 收起来，
+	# 照片条跟着一起收，不会压在新面板上；开始游戏（menu_root 收起）时同样收掉。
+	title_photos = TitlePhotoCarousel.new()
+	title_photos.name = "TitlePhotoCarousel"
+	title_photos.reduced_motion_check = func() -> bool:
+		return wetland != null and wetland.reduced_motion
+	# ⚠ 必须挂在 menu_root 上：放大层是往父节点加的全屏层，挂在自己的小块里只有 520×420
+	menu_root.add_child(title_photos)
+	menu_col.visibility_changed.connect(_sync_title_photos)
+	menu_root.visibility_changed.connect(_sync_title_photos)
+	_sync_title_photos()
+
+	# --- 第 4 页：天赋树 ---
+	menu_talent_panel = TalentTreePanel.new()
+	menu_talent_panel.visible = false
+	menu_talent_panel.back_requested.connect(_on_talent_back)
+	center.add_child(menu_talent_panel)
+
+	# --- 设置面板 ---
+	menu_settings_panel = PanelContainer.new()
+	menu_settings_panel.custom_minimum_size = Vector2(400, 0)
+	_panel_style(menu_settings_panel, Color(0.20, 0.14, 0.09, 0.97))
+	menu_settings_panel.visible = false
+	center.add_child(menu_settings_panel)
+
+	var svb := VBoxContainer.new()
+	svb.add_theme_constant_override("separation", 12)
+	menu_settings_panel.add_child(svb)
+
+	var s_title := _make_label("设置", 24, Color(1, 0.9, 0.55))
+	s_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	svb.add_child(s_title)
+
+	var s_sep := HSeparator.new()
+	svb.add_child(s_sep)
+
+	# 音量调节
+	var vol_controls := VBoxContainer.new()
+	vol_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	vol_controls.add_theme_constant_override("separation", 2)
+	svb.add_child(vol_controls)
+	audio_volume_slider = HSlider.new()
+	audio_volume_slider.min_value = 0
+	audio_volume_slider.max_value = 100
+	audio_volume_slider.step = 1
+	audio_volume_slider.value = bgm_volume * 100
+	audio_volume_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	audio_volume_slider.value_changed.connect(_on_volume_changed)
+	vol_controls.add_child(audio_volume_slider)
+	audio_volume_label = _make_label("音量：%d%%" % int(bgm_volume * 100), 14, Color(1, 0.95, 0.6))
+	audio_volume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	vol_controls.add_child(audio_volume_label)
+
+	# 结算动画速度：手感因人而异，做成滑块而不是写死在代码里
+	var spd_row := HBoxContainer.new()
+	spd_row.add_theme_constant_override("separation", 8)
+	svb.add_child(spd_row)
+	spd_row.add_child(_make_label("结算速度", 16, Color(0.82, 0.86, 0.9)))
+	score_speed_slider = HSlider.new()
+	score_speed_slider.min_value = SCORE_SPEED_MIN * 100.0
+	score_speed_slider.max_value = SCORE_SPEED_MAX * 100.0
+	score_speed_slider.step = 5
+	score_speed_slider.value = score_speed * 100.0
+	score_speed_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	score_speed_slider.tooltip_text = "结算动画的快慢。100% 为默认；调小则更慢、看得更清楚，调大则更快。下一回合结算起生效。"
+	score_speed_slider.value_changed.connect(_on_score_speed_changed)
+	spd_row.add_child(score_speed_slider)
+	score_speed_label = _make_label("", 14, Color(1, 0.95, 0.6))
+	spd_row.add_child(score_speed_label)
+	_sync_score_speed_ui()
+
+	var replay_btn := _make_button("重新观看开场动画", _on_replay_intro, 20)
+	replay_btn.custom_minimum_size = Vector2(0, 52)
+	svb.add_child(replay_btn)
+
+	var replay_ending_btn := _make_button("重新观看结尾短片", _on_replay_ending, 20)
+	replay_ending_btn.custom_minimum_size = Vector2(0, 52)
+	svb.add_child(replay_ending_btn)
+
+	# 制作人员：从主菜单挪进设置里
+
+	menu_credits_btn = _make_button("制作人员", _show_credits_panel, 18)
+	menu_credits_btn.custom_minimum_size = Vector2(0, 44)
+	svb.add_child(menu_credits_btn)
+
+	# --- 危险操作：清空存档（红色 + 二次确认）---
+	svb.add_child(HSeparator.new())
+	clear_status_label = _make_label("", 13, Color(0.66, 0.88, 0.68))
+	clear_status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	svb.add_child(clear_status_label)
+	menu_clear_save_btn = _make_button("清空当前存档", _show_clear_confirm, 18, true)
+	menu_clear_save_btn.custom_minimum_size = Vector2(0, 44)
+	svb.add_child(menu_clear_save_btn)
+
+	var s_back := _make_button("返回", _on_settings_back, 16)
+	s_back.custom_minimum_size = Vector2(0, 40)
+	svb.add_child(s_back)
+
+	# --- 清空存档的二次确认框 ---
+	menu_clear_confirm_panel = PanelContainer.new()
+	menu_clear_confirm_panel.custom_minimum_size = Vector2(440, 0)
+	_panel_style(menu_clear_confirm_panel, Color(0.26, 0.12, 0.10, 0.98))
+	menu_clear_confirm_panel.visible = false
+	center.add_child(menu_clear_confirm_panel)
+
+	# 变量名统一加 cl_ 前缀：_build_menu 是个超长函数，
+	# 制作人员面板已经占用了 cvb / c_title 这些短名字，别撞
+	var cl_vb := VBoxContainer.new()
+	cl_vb.add_theme_constant_override("separation", 12)
+	menu_clear_confirm_panel.add_child(cl_vb)
+
+	var cl_title := _make_label("确认清空存档？", 22, Color(1.0, 0.72, 0.66))
+	cl_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cl_vb.add_child(cl_title)
+
+	var cl_body := _make_label(
+			"将永久删除：\n· 当前对局进度(继续游戏)\n· 全部灵感、研修分配与噩梦满树奖励\n· 旧天赋进度备份\n· 全部成就\n\n此操作不可撤销。",
+			14, Color(0.92, 0.88, 0.86))
+	cl_body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cl_body.custom_minimum_size = Vector2(320, 0)
+	cl_vb.add_child(cl_body)
+
+	var cl_ok := _make_button("确认清空", _on_clear_confirm_ok, 18, true)
+	cl_ok.custom_minimum_size = Vector2(0, 46)
+	cl_vb.add_child(cl_ok)
+
+	var cl_cancel := _make_button("取消", _on_clear_confirm_cancel, 18)
+	cl_cancel.custom_minimum_size = Vector2(0, 44)
+	cl_vb.add_child(cl_cancel)
+
+	# --- 制作人员面板 ---
+	menu_credits_panel = PanelContainer.new()
+	menu_credits_panel.custom_minimum_size = Vector2(420, 0)
+	_panel_style(menu_credits_panel, Color(0.20, 0.14, 0.09, 0.97))
+	menu_credits_panel.visible = false
+	center.add_child(menu_credits_panel)
+
+	var cvb := VBoxContainer.new()
+	cvb.add_theme_constant_override("separation", 10)
+	menu_credits_panel.add_child(cvb)
+
+	var c_title := _make_label("制作人员", 24, Color(1, 0.9, 0.55))
+	c_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	cvb.add_child(c_title)
+
+	var c_sep := HSeparator.new()
+	cvb.add_child(c_sep)
+
+	var credits := [
+		["策划", "QQQi_ZZZhe"],
+		["主程 / 配乐", "Kanshin"],
+		["美术", "C3L1K1N4"],
+		["科学顾问", "Oliveira"],
+	]
+	for e in credits:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 6)
+		cvb.add_child(row)
+		var role_l := _make_label(str(e[0]) + "：", 16, Color(0.72, 0.76, 0.80))
+		row.add_child(role_l)
+		var name_l := _make_label(str(e[1]), 16, Color(0.96, 0.94, 0.88))
+		name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		name_l.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		row.add_child(name_l)
+
+	var c_back := _make_button("返回", _on_credits_back, 16)
+	c_back.custom_minimum_size = Vector2(0, 40)
+	cvb.add_child(c_back)
+
+
+	# --- 成就面板 ---
+	menu_achievements_panel = PanelContainer.new()
+	menu_achievements_panel.custom_minimum_size = Vector2(580, 0)
+	_panel_style(menu_achievements_panel, Color(0.20, 0.14, 0.09, 0.97))
+	menu_achievements_panel.visible = false
+	center.add_child(menu_achievements_panel)
+
+	var avb := VBoxContainer.new()
+	avb.add_theme_constant_override("separation", 10)
+	menu_achievements_panel.add_child(avb)
+
+	var a_title := _make_label("成就", 24, Color(1, 0.9, 0.55))
+	a_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	avb.add_child(a_title)
+
+	ach_count_label = _make_label("", 14, Color(0.72, 0.76, 0.80))
+	ach_count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	avb.add_child(ach_count_label)
+
+	avb.add_child(HSeparator.new())
+
+	var a_scroll := ScrollContainer.new()
+	MotionScroll.attach(a_scroll)
+	a_scroll.custom_minimum_size = Vector2(540, 360)
+	a_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	avb.add_child(a_scroll)
+
+	ach_rows_col = VBoxContainer.new()
+	ach_rows_col.add_theme_constant_override("separation", 14)
+	ach_rows_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	a_scroll.add_child(ach_rows_col)
+
+	var a_back := _make_button("返回", _on_achievements_back, 16)
+	a_back.custom_minimum_size = Vector2(0, 40)
+	avb.add_child(a_back)
+
+
+
+
+# ==================== 成就 ====================
+
+func _show_achievements_panel() -> void:
+	menu_col.visible = false
+	menu_talent_panel.visible = false
+	menu_settings_panel.visible = false
+	menu_credits_panel.visible = false
+	_build_achievement_rows()   # 每次打开重建：解锁状态可能刚变过，不能只在建菜单时铺一次
+	menu_achievements_panel.visible = true
+
+
+func _on_achievements_back() -> void:
+	menu_achievements_panel.visible = false
+	menu_col.visible = true
+	_menu_state(0)
+
+
+## 重建成就列表。解锁的点亮成金牌，未解锁的用灰牌。
+func _build_achievement_rows() -> void:
+	if ach_rows_col == null:
+		return
+	for c in ach_rows_col.get_children():
+		ach_rows_col.remove_child(c)
+		c.queue_free()
+	var visible_achievements := Achievements.visible_list()
+	ach_count_label.text = "已解锁 %d / %d" % [Achievements.unlocked_count(), visible_achievements.size()]
+	for a in visible_achievements:
+		var got: bool = Achievements.is_unlocked(str(a["id"]))
+		var row := HBoxContainer.new()
+		row.set_meta("achievement_id", str(a["id"]))
+		row.add_theme_constant_override("separation", 14)
+
+		var icon := _make_achievement_icon(a, got, 44)
+		icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(icon)
+
+		var col := VBoxContainer.new()
+		col.add_theme_constant_override("separation", 3)
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.add_child(_make_label(str(a["name"]), 18,
+				Color(1, 0.88, 0.55) if got else Color(0.60, 0.60, 0.64)))
+		var ds := _make_label(str(a["desc"]), 13,
+				Color(0.80, 0.78, 0.74) if got else Color(0.52, 0.52, 0.56))
+		ds.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		ds.custom_minimum_size = Vector2(430, 0)
+		col.add_child(ds)
+		row.add_child(col)
+		ach_rows_col.add_child(row)
+
+
+## 成就解锁提示层。layer=12：盖在算分动画(7)与结算弹窗之上，
+## 又低于暂停(20)/开场(30) —— 「Steam 式」提示本来就该压在游戏画面上。
+func _build_achievement_popup() -> void:
+	ach_layer = CanvasLayer.new()
+	ach_layer.name = "AchievementLayer"
+	ach_layer.layer = 12
+	ach_layer.visible = false
+	add_child(ach_layer)
+
+	ach_popup = PanelContainer.new()
+	ach_popup.name = "AchPopup"
+	ach_popup.mouse_filter = Control.MOUSE_FILTER_IGNORE   # 不挡操作
+	_panel_style(ach_popup, Color(0.12, 0.10, 0.08, 0.96))
+	ach_layer.add_child(ach_popup)
+
+	var hb := HBoxContainer.new()
+	hb.add_theme_constant_override("separation", 12)
+	ach_popup.add_child(hb)
+
+	ach_popup_icon = _make_icon(Achievements.MEDAL_GRID, ACH_GOLD, 44)
+	ach_popup_icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hb.add_child(ach_popup_icon)
+
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", 2)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hb.add_child(col)
+	col.add_child(_make_label("成就已解锁", 11, Color(0.72, 0.76, 0.80)))
+	ach_popup_name = _make_label("", 18, Color(1, 0.88, 0.55))
+	col.add_child(ach_popup_name)
+	# 触发条件用小字写在下面
+	ach_popup_desc = _make_label("", 12, Color(0.80, 0.78, 0.74))
+	ach_popup_desc.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	ach_popup_desc.custom_minimum_size = Vector2(206, 0)
+	col.add_child(ach_popup_desc)
+
+
+## Achievements.achievement_unlocked 的接收端。一回合可能同时解锁多个，排队播。
+func _on_achievement_unlocked(achievement_id: String) -> void:
+	if menu_achievements_panel != null and menu_achievements_panel.visible:
+		_build_achievement_rows()
+	_ach_queue.append(achievement_id)
+	if not _ach_showing:
+		_drain_achievement_queue()
+
+
+func _drain_achievement_queue() -> void:
+	_ach_showing = true
+	while not _ach_queue.is_empty():
+		await _show_achievement_popup(str(_ach_queue.pop_front()))
+	_ach_showing = false
+
+
+## 弹一次成就提示：从屏幕右侧滑入 → 停住 → 滑出，全程约 5 秒。
+## 位置取屏幕右侧偏下 —— 上方是生态指标面板与牌堆，别压上去。
+func _show_achievement_popup(achievement_id: String) -> void:
+	var a: Dictionary = Achievements.find(achievement_id)
+	if a.is_empty() or ach_popup == null:
+		return
+	const SLIDE := 0.35
+	const HOLD := 4.30        # 0.35 + 4.30 + 0.35 ≈ 5 秒
+
+	var popup_tex: Texture2D = _achievement_art(a)
+	if popup_tex != null:
+		ach_popup_icon.texture = popup_tex
+		ach_popup_icon.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+		# 弹窗图标框是 44×44 的方框，非正方形美术图直接铺进去会被横向压扁
+		ach_popup_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	else:
+		ach_popup_icon.texture = _pixel_icon_sized(str(a["icon"]), ACH_GOLD, 44)
+		ach_popup_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		ach_popup_icon.stretch_mode = TextureRect.STRETCH_SCALE
+	ach_popup_name.text = str(a["name"])
+	ach_popup_desc.text = str(a["desc"])
+
+	ach_layer.visible = true
+	ach_popup.visible = true
+	# 先让它自己算出尺寸再定位：第一帧 size 还是 0，直接算会闪一下
+	await get_tree().process_frame
+	var vp := get_viewport().get_visible_rect().size
+	var w: float = maxf(ach_popup.size.x, 280.0)
+	var h: float = ach_popup.size.y
+	var y: float = clampf(vp.y * 0.66 - h * 0.5, 6.0, vp.y - h - 6.0)
+	var x_home: float = vp.x - w - 16.0
+	var x_hidden: float = vp.x + 8.0
+	ach_popup.position = Vector2(x_hidden, y)
+
+	var tw := Motion.tween(ach_popup, "linear")
+	Motion.curve(tw, "power2.out")
+	tw.tween_property(ach_popup, "position:x", x_home, SLIDE)
+	await get_tree().create_timer(SLIDE + HOLD).timeout
+	# ⚠ 时序用 create_timer，不用 await tween.finished —— tween 被 kill 时该信号永不发出
+	var tw2 := Motion.tween(ach_popup, "linear")
+	Motion.curve(tw2, "power2.in")
+	tw2.tween_property(ach_popup, "position:x", x_hidden, SLIDE)
+	await get_tree().create_timer(SLIDE).timeout
+	ach_popup.visible = false
+	ach_layer.visible = false
+
+
+## 成就「？！同花！？」：同一回合打出三张及以上同一类别的牌
+## 调用点：_finish_turn 执行完所有牌之后。已解锁时 try_unlock 内部直接返回，
+## 所以这里可以无脑调，不用自己判重。
+func _check_flush_achievement(played: Array) -> void:
+	var cnt: Dictionary = {}
+	for i in played:
+		var cat := _card_category(str(card_infos[i]["card_id"]))
+		if cat == "":
+			continue
+		cnt[cat] = int(cnt.get(cat, 0)) + 1
+	for cat in cnt:
+		if int(cnt[cat]) >= 3:
+			Achievements.try_unlock("flush")
+			return
+
+
+## 按 id 取卡牌数据字典（找不到返回空字典）
+func _find_card_data(card_id: String) -> Dictionary:
+	for c in GameState.ACTION_CARDS:
+		if str(c["id"]) == card_id:
+			return c
+	return {}
+
+
+## 卡牌的类别（ecology / social / manage）；找不到返回空串
+func _card_category(card_id: String) -> String:
+	return str(_find_card_data(card_id).get("category", ""))
+
+
+# ==================== 开场像素 PPT（Undertale 风） ====================
+func _is_first_play() -> bool:
+	return not FileAccess.file_exists("user://intro_seen")
+
+
+func _mark_intro_seen() -> void:
+	var f := FileAccess.open("user://intro_seen", FileAccess.WRITE)
+	if f != null:
+		f.close()
+
+
+## 多色像素画：palette 为 字符->颜色，其余视为透明
+func _pixel_art(grid: String, palette: Dictionary) -> ImageTexture:
+	var rows: Array = []
+	for r in grid.split("\n"):
+		var line: String = (r as String).strip_edges()
+		if line != "":
+			rows.append(line)
+	var h := rows.size()
+	var w := (rows[0] as String).length()   # 以首行为准，长行截断、短行补透明
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	for y in h:
+		var line: String = rows[y]
+		for x in w:
+			var ch: String = line[x] if x < line.length() else " "
+			img.set_pixel(x, y, palette.get(ch, Color(0, 0, 0, 0)))
+	return ImageTexture.create_from_image(img)
+
+
+func _build_intro() -> void:
+	intro_layer = CanvasLayer.new()
+	intro_layer.layer = 30
+	add_child(intro_layer)
+	intro_root = Control.new()
+	intro_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	intro_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	intro_layer.add_child(intro_root)
+	var bg := ColorRect.new()
+	bg.color = Color(0.03, 0.05, 0.07, 1.0)
+	bg.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	intro_root.add_child(bg)
+	# 照片：铺满上方大部分屏幕，保持比例居中、不裁切（统一按 16:9 素材放）
+	intro_image = TextureRect.new()
+	intro_image.set_anchors_preset(Control.PRESET_FULL_RECT)
+	intro_image.offset_left = 24
+	intro_image.offset_right = -24
+	intro_image.offset_top = 18
+	intro_image.offset_bottom = -214
+	intro_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	intro_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	intro_image.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	intro_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	intro_root.add_child(intro_image)
+	# 文案区：锚在屏幕底部（固定高度），照片大小改了也不会把文字顶跑
+	var col := VBoxContainer.new()
+	col.set_anchors_preset(Control.PRESET_BOTTOM_WIDE)
+	col.offset_left = 80
+	col.offset_right = -80
+	col.offset_top = -206
+	col.offset_bottom = -22
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", 12)
+	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	intro_root.add_child(col)
+	intro_col = col
+	intro_body = _make_label("", 20, Color(0.92, 0.94, 0.95))
+	intro_body.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	intro_body.vertical_alignment = VERTICAL_ALIGNMENT_TOP
+	intro_body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	intro_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# 定高：打字机逐字显示时行数会变，不定高整块文字会上下跳
+	intro_body.custom_minimum_size = Vector2(0, 84)
+	intro_body.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.7))
+	intro_body.add_theme_constant_override("outline_size", 3)
+	col.add_child(intro_body)
+	intro_hint = _make_label("回车 继续　·　ESC 跳过", 13, Color(0.55, 0.6, 0.65))
+	intro_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(intro_hint)
+
+
+func _show_intro() -> void:
+	if intro_root == null:
+		_build_intro()
+	intro_slides = _make_intro_slides()
+	intro_index = 0
+	_intro_playing = true
+	_intro_elapsed = 0.0
+	_intro_advancing = false
+	intro_layer.visible = true
+	_render_intro_slide()
+
+
+func _render_intro_slide() -> void:
+	_intro_elapsed = 0.0
+	var slide: Dictionary = intro_slides[intro_index]
+	intro_image.texture = load(slide["image"]) as Texture2D
+	# 正文交给打字机：先清空，_process 里逐字补上来
+	_intro_full_text = slide["body"]
+	_intro_typed = 0.0
+	_intro_type_done = false
+	intro_body.text = ""
+	_intro_update_typing()
+	# 淡入
+	intro_col.modulate.a = 0.0
+	var tw := Motion.tween(intro_col, "linear", "opacity")
+	Motion.curve(tw, "power2.out")
+	tw.tween_property(intro_col, "modulate:a", 1.0, 0.45)
+
+
+## 打字机：按 INTRO_TYPE_CPS 逐字显示正文；显示满一行后 _intro_type_done 才为真
+func _intro_update_typing() -> void:
+	var total := _intro_full_text.length()
+	var shown := mini(int(_intro_typed), total)
+	intro_body.text = _intro_full_text.substr(0, shown)
+	if shown >= total:
+		_intro_type_done = true
+		_intro_elapsed = 0.0   # 自动翻页的计时从「全文打完」那一刻开始
+
+
+## 打字中按回车/点击：先把全文亮出来；已经打完再按才翻下一张
+func _intro_press() -> void:
+	if not _intro_type_done:
+		_intro_typed = float(_intro_full_text.length())
+		_intro_update_typing()
+		return
+	_advance_intro()
+
+
+func _advance_intro() -> void:
+	if _intro_advancing:
+		return
+	_intro_advancing = true
+	# 淡出，完成后再切下一张 / 结束
+	var tw := Motion.tween(intro_col, "linear", "opacity")
+	Motion.curve(tw, "power2.in")
+	tw.tween_property(intro_col, "modulate:a", 0.0, 0.35)
+	tw.tween_callback(func() -> void:
+		_intro_advancing = false
+		if not _intro_playing:
+			return  # 淡出期间已被 ESC 跳过
+		intro_index += 1
+		if intro_index >= intro_slides.size():
+			_finish_intro()
+		else:
+			_render_intro_slide())
+
+
+func _finish_intro() -> void:
+	_intro_playing = false
+	_intro_advancing = false
+	_intro_type_done = true
+	_intro_typed = 0.0
+	intro_layer.visible = false
+	_mark_intro_seen()
+	_show_menu()
+
+
+func _make_intro_slides() -> Array:
+	return [
+		{
+			"image": "res://assets/art/intro/intro-01.jpg",
+			"body": "这里是生灵的乐园。万顷碧波，候鸟翔集。微风拂过水草，一切都是最美的模样。",
+		},
+		{
+			"image": "res://assets/art/intro/intro-02.jpg",
+			"body": "然而，危机正悄然逼近。干旱、污染、围垦……湖水在退缩，候鸟与鱼类，正在失去它们的家园。",
+		},
+		{
+			"image": "res://assets/art/intro/intro-03.jpg",
+			"body": "你，被任命为鄱阳湖新任湖区管理员。\n在这16个回合（4年）里，你需要平衡资金与生态，守护水位、植被与万物生灵。",
+		},
+		{
+			"image": "res://assets/art/intro/intro-04.jpg",
+			"body": "肩并肩，面向未来。愿夕阳下的鄱阳湖，能重焕生机，生生不息。",
+		},
+	]
+
+
+func _show_menu() -> void:
+	_stop_deal_sfx()
+	_deal_sfx_turn = -1
+	if impact_feedback != null: impact_feedback.clear()
+	# 作废可能还在跑的算分动画：代次 +1，它每个 await 回来都会发现 ID 变了而立即退出。
+	# 不这样做的话，回到主菜单后那段协程会继续改已经不该动的节点。
+	_score_anim_id += 1
+	_score_animating = false
+	_sort_animating = false
+	# 收掉可能在播的成就提示，别让它杵在主菜单上。
+	# 它的协程会自己跑完（时序用的是 create_timer，不会挂死），
+	# 跑完时再设一次 visible=false 也无害。
+	_ach_queue.clear()
+	if ach_layer != null:
+		ach_layer.visible = false
+	menu_root.visible = true
+	menu_col.visible = true
+	menu_talent_panel.visible = false
+	menu_settings_panel.visible = false
+	menu_credits_panel.visible = false
+	_close_knowledge_viewer()   # 回到开始页时图鉴也要收起来
+	_set_hud_visible(false)   # 开始页是干净的全景：HUD 让位给标题与选项
+	_menu_state(0)
+	_set_menu_camera(true)
+	_roll_creeper_visibility()   # 苦力怕彩蛋按概率出现
+
+
+## 开始页期间隐藏 HUD（左上信息栏 / 右上生态指标 / 事件横幅 / 右下按钮）
+func _set_hud_visible(v: bool) -> void:
+	var canvas := get_node_or_null("UICanvas")
+	if canvas:
+		canvas.visible = v
+	if not v:
+		_close_warn_history()   # 回主菜单/开始页时，别把回顾面板留在屏幕上
+
+
+## 开始页右上角照片条：只在「开始页 + 左下选项列可见」时出现。
+## 跟着 menu_col 走的原因：设置/成就/知识卡/制作人员/天赋树每个面板打开时
+## 都会先把 menu_col 收起来，返回时再放回来 —— 一处判据自动覆盖全部分支，
+## 也不用在这些函数里各加一行（漏一处就是「照片条压在新面板上」）。
+## 放大层是独立的全屏模态，收起时必须一起关，否则它会留在屏幕上。
+func _sync_title_photos() -> void:
+	if title_photos == null:
+		return
+	var show_photos: bool = menu_root.visible and menu_col.visible
+	title_photos.visible = show_photos
+	if not show_photos:
+		title_photos.close_zoom()
+
+
+## 开始页层级：0 = 主选项 / 1 = 难度 / 2 = 种子
+func _menu_state(state: int) -> void:
+	var main_level := state == 0
+	menu_start_btn.visible = main_level          # 新游戏
+	menu_continue_btn.visible = main_level and has_save()  # 继续游戏（有存档才显示）
+	# 天赋树暂关时这个按钮根本没建（见 TALENT_TREE_ENABLED），必须判空
+	if menu_talent_btn != null:
+		menu_talent_btn.visible = main_level
+	menu_settings_btn.visible = main_level
+	# 制作人员已移入设置面板，显隐由面板自己管，不在这里控制
+	menu_achievements_btn.visible = main_level
+	menu_knowledge_btn.visible = main_level
+	menu_utilities.visible = main_level
+	menu_separator.visible = main_level
+	menu_quit_btn.visible = main_level
+
+	menu_easy_btn.visible = state == 1
+	menu_normal_btn.visible = state == 1
+	menu_hard_btn.visible = state == 1
+	menu_nightmare_btn.visible = state == 1
+
+	var seed_level := state == 2
+	menu_mode_label.visible = seed_level
+	menu_seed_label.visible = seed_level
+	seed_input.visible = seed_level
+	menu_seed_start_btn.visible = seed_level
+
+	menu_back_btn.visible = state != 0
+	menu_hint.text = ""
+	if seed_level:
+		seed_input.grab_focus()
+
+
+func _on_title_start() -> void:
+	_menu_state(1)
+
+
+## 四档难度共用（用 bind 传难度值）。难度名走 GameState.difficulty_name()，
+## 界面不再各写一份字面量。
+func _on_difficulty_pick(d: int) -> void:
+	GameState.difficulty = d
+	menu_mode_label.text = "模式：%s" % GameState.difficulty_name()
+	_update_threshold_lines()
+	_menu_state(2)
+
+
+## 返回上一层：种子 → 难度，难度 → 主选项
+func _on_menu_back() -> void:
+	if menu_seed_start_btn.visible:
+		_menu_state(1)
+	else:
+		_menu_state(0)
+
+
+## 设置 / 制作人员：入口先摆上，具体效果待做
+func _on_menu_placeholder() -> void:
+	_flash_menu_hint(menu_hint, "(暂未开放)")
+
+
+## 菜单提示：显示后 3 秒自动消失
+func _flash_menu_hint(label: Label, text: String) -> void:
+	label.text = text
+	var tw := Motion.tween(label, "linear", "hint")
+	tw.tween_interval(3.0)
+	tw.tween_callback(func() -> void:
+		if label.text == text:
+			label.text = "")
+
+
+## 退出：直接关闭游戏窗口
+func _on_menu_quit() -> void:
+	get_tree().quit()
+
+
+func _show_talent_panel() -> void:
+	menu_col.visible = false
+	menu_settings_panel.visible = false
+	menu_credits_panel.visible = false
+	menu_talent_panel.visible = true
+	_refresh_talent_panel()
+
+
+func _on_talent_back() -> void:
+	menu_talent_panel.visible = false
+	menu_col.visible = true
+	_menu_state(0)
+
+
+func _show_settings_panel() -> void:
+	menu_col.visible = false
+	menu_talent_panel.visible = false
+	menu_credits_panel.visible = false
+	menu_achievements_panel.visible = false
+	# 每次重进都收起确认框、清掉上次的「已清空」提示，免得误导
+	menu_clear_confirm_panel.visible = false
+	clear_status_label.text = ""
+	menu_settings_panel.visible = true
+
+
+func _on_settings_back() -> void:
+	menu_settings_panel.visible = false
+	menu_col.visible = true
+	_menu_state(0)
+
+
+# ==================== 清空存档 ====================
+
+## 清空「当前存档」—— 三份一起清：
+##   user://savegame.json      单局进度（「继续游戏」读的那个）
+##   user://talents.json       天赋点与已解锁天赋
+##   user://achievements.json  成就
+## 必须先过 _show_clear_confirm() 的二次确认，这个函数只负责真正动手。
+func _clear_all_saves() -> void:
+	_clear_save()
+	Talents.reset_all()
+	Achievements.reset_all()
+	Knowledge.reset_all()
+
+
+func _show_clear_confirm() -> void:
+	menu_settings_panel.visible = false
+	menu_clear_confirm_panel.visible = true
+
+
+func _on_clear_confirm_cancel() -> void:
+	menu_clear_confirm_panel.visible = false
+	menu_settings_panel.visible = true
+
+
+func _on_clear_confirm_ok() -> void:
+	_clear_all_saves()
+	menu_clear_confirm_panel.visible = false
+	menu_settings_panel.visible = true
+	clear_status_label.text = "已清空：对局进度 / 天赋 / 成就"
+	# 天赋页此时通常还没铺过内容，但铺过就要立刻反映归零后的点数与状态
+	_refresh_talent_panel()
+
+
+func _show_credits_panel() -> void:
+	_info_back_to_settings = menu_settings_panel.visible
+	menu_col.visible = false
+	menu_talent_panel.visible = false
+	menu_settings_panel.visible = false
+	menu_achievements_panel.visible = false
+	menu_credits_panel.visible = true
+
+
+func _on_credits_back() -> void:
+	menu_credits_panel.visible = false
+	if _info_back_to_settings:
+		_info_back_to_settings = false
+		menu_settings_panel.visible = true
+		return
+	menu_col.visible = true
+	_menu_state(0)
+
+
+
+
+## 设置里重播开场动画：隐藏菜单后重新播放（播完自动回主菜单）
+func _on_replay_intro() -> void:
+	menu_settings_panel.visible = false
+	menu_root.visible = false
+	_show_intro()
+
+
+func _on_replay_ending() -> void:
+	menu_settings_panel.visible = false
+	menu_root.visible = false
+	_play_ending()
+
+
+## 每个难度一份「结尾短片看过」的标记（账号级，和 intro_seen / 成就一样不随存档清空）。
+func _ending_seen_path() -> String:
+	return "user://ending_seen_%d" % int(GameState.difficulty)
+
+
+func _has_seen_ending() -> bool:
+	return FileAccess.file_exists(_ending_seen_path())
+
+
+func _mark_ending_seen() -> void:
+	var f := FileAccess.open(_ending_seen_path(), FileAccess.WRITE)
+	if f != null:
+		f.close()
+
+
+## 该难度第一次结束：标记成已看、开始播片，返回 true 让主菜单延后到播完。
+## 看过、或者素材缺失（比如导出时漏了视频）都返回 false，直接回主菜单，不卡流程。
+func _try_play_ending() -> bool:
+	if _has_seen_ending() or not ResourceLoader.exists(ENDING_VIDEO):
+		return false
+	_mark_ending_seen()
+	_play_ending()
+	return true
+
+
+func _build_ending_layer() -> void:
+	ending_layer = CanvasLayer.new()
+	ending_layer.layer = 90
+	ending_layer.visible = false
+	add_child(ending_layer)
+	var backdrop := ColorRect.new()
+	backdrop.color = Color.BLACK
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	backdrop.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ending_layer.add_child(backdrop)
+	ending_player = VideoStreamPlayer.new()
+	ending_player.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ending_player.expand = true                       # 铺满窗口，保持比例
+	ending_player.volume_db = _volume_db(bgm_volume)
+	ending_player.finished.connect(_finish_ending)
+	ending_layer.add_child(ending_player)
+	ending_hint = _make_label("点击或按 Esc 跳过", 14, Color(1, 1, 1, 0.62))
+	ending_hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	ending_hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	ending_layer.add_child(ending_hint)
+
+
+func _play_ending() -> void:
+	if ending_layer == null:
+		_build_ending_layer()
+	if not ResourceLoader.exists(ENDING_VIDEO):
+		_show_menu()
+		return
+	if bgm_player != null:
+		bgm_player.stop()          # 只要在播片，BGM 就停着
+	_ending_playing = true
+	ending_layer.visible = true
+	# 每次都按当前音量设定刷新一遍 —— 玩家可能刚在设置里拖过滑块
+	ending_player.volume_db = _volume_db(bgm_volume)
+	ending_player.stream = load(ENDING_VIDEO)
+	ending_player.play()
+
+
+## 播完与跳过走同一条收尾：关层、BGM 从头放、回主菜单。
+func _finish_ending() -> void:
+	if not _ending_playing:
+		return
+	_ending_playing = false
+	if ending_player != null:
+		ending_player.stop()
+	if ending_layer != null:
+		ending_layer.visible = false
+	_apply_bgm()                   # _apply_bgm 是 stop + 从头 play
+	_show_menu()
+
+
+# ==================== 音频 / BGM ====================
+## 读取音量与 BGM 选择（无存档则用默认）
+func _load_audio_settings() -> void:
+	if not FileAccess.file_exists(AUDIO_SETTINGS_PATH):
+		return
+	var f := FileAccess.open(AUDIO_SETTINGS_PATH, FileAccess.READ)
+	if f == null:
+		return
+	var text := f.get_as_text()
+	f.close()
+	var data = JSON.parse_string(text)
+	if data is Dictionary:
+		# 旧的手选曲目索引不再适用；危机曲只由游戏状态触发。
+		bgm_index = 0
+		bgm_volume = clampf(float(data.get("bgm_volume", 0.8)), 0.0, 1.0)
+		score_speed = clampf(float(data.get("score_speed", 1.0)), SCORE_SPEED_MIN, SCORE_SPEED_MAX)
+
+
+func _save_audio_settings() -> void:
+	var data := {"bgm_volume": bgm_volume, "score_speed": score_speed}
+	var f := FileAccess.open(AUDIO_SETTINGS_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(data))
+		f.close()
+
+
+## 建立 BGM 播放器并开始循环播放
+func _setup_bgm() -> void:
+	bgm_player = AudioStreamPlayer.new()
+	add_child(bgm_player)
+	for path in BGM_PATHS:
+		var stream: AudioStream = load(path)
+		if stream is AudioStreamMP3:
+			stream.loop = true
+		_bgm_streams.append(stream)
+	_apply_bgm()
+	bgm_player.finished.connect(func() -> void: bgm_player.play())  # 循环
+
+
+## 载入当前 BGM 与音量并播放
+func _apply_bgm(recover: bool = false) -> void:
+	if _bgm_recovery_tween != null:
+		_bgm_recovery_tween.kill()
+		_bgm_recovery_tween = null
+	bgm_player.stop()
+	bgm_player.stream = _bgm_streams[bgm_index]
+	bgm_player.pitch_scale = BGM_RECOVERY_SPEED if recover else 1.0
+	bgm_player.volume_db = _volume_db(bgm_volume)
+	_sync_master_mute()
+	bgm_player.play()
+	if recover:
+		_bgm_recovery_tween = create_tween()
+		_bgm_recovery_tween.set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		_bgm_recovery_tween.tween_property(bgm_player, "pitch_scale", 1.0, BGM_RECOVERY_SECONDS)
+	_update_bgm_btn()
+
+
+## 危机状态持续到修复；临界风险沿用 HUD 的确定性推演，不消耗随机流。
+func _update_bgm_state() -> void:
+	if bgm_player == null:
+		return
+	var in_game := _playing and (menu_root == null or not menu_root.visible)
+	var danger := false
+	if in_game:
+		# 失败报告保留危机氛围，通关报告回归主题。
+		if GameState.game_over:
+			danger = GameState.is_failure
+		else:
+			danger = GameState.has_unresolved_music_crisis()
+			# 结算结束的数值已演化过，等下一回合开始再预测，避免重复算一次。
+			if not _score_animating and _current_phase != "popup_settlement":
+				var key: Array = [GameState.metrics, GameState.difficulty, GameState.turn,
+					GameState.run_seed, GameState.used_action_ids, GameState.pending_crisis]
+				if key != _bgm_risk_key:
+					_bgm_risk_key = key.duplicate(true)
+					_bgm_risk = false
+					for metric in GameState.METRIC_NAMES:
+						if metric == "water_level": continue
+						var risk: Dictionary = GameState.metric_hover_preview(metric)
+						if int(risk["health_worst"]) < int(risk["line"]) + BGM_RISK_THRESHOLD_OFFSET:
+							_bgm_risk = true
+							break
+				danger = danger or _bgm_risk
+			elif _score_animating or _current_phase == "popup_settlement":
+				danger = danger or _bgm_danger
+	if danger == _bgm_danger:
+		return
+	_bgm_danger = danger
+	bgm_index = 1 if danger else 0
+	_apply_bgm(not danger and in_game)
+
+
+## 建立音效播放池。同一个 AudioStream 可以被多个 player 同时播，
+## 所以轮转复用就能支撑「连击音阶」那种密集触发而互不打断。
+func _setup_sfx() -> void:
+	# 整段发牌录音独占一路，不会被结算音效池轮转截断。
+	_deal_sfx_player = AudioStreamPlayer.new()
+	add_child(_deal_sfx_player)
+	for i in SFX_POOL_SIZE:
+		var p := AudioStreamPlayer.new()
+		add_child(p)
+		_sfx_players.append(p)
+	for key in SFX_PATHS:
+		# 缺文件时只告警不崩溃：但必须喊一声 —— 最常见的翻车方式是
+		# 「wav 生成了但没在编辑器里导入」，那种情况下游戏照跑、全程静音，极难排查。
+		if ResourceLoader.exists(SFX_PATHS[key]):
+			_sfx_streams[key] = load(SFX_PATHS[key])
+		else:
+			push_warning("音效缺失：%s(跑一次 tools/make_ding.py，再在编辑器里打开工程让它导入)" % SFX_PATHS[key])
+
+
+## 播一个音效。
+## pitch 用来做「连击音阶」：同一种叮逐次升 key，是小丑牌那种层层叠加感的来源。
+## vol_db 是相对音量偏移 —— 密集的小数字要压到 -8dB，落定的合计给 0dB，
+## 否则 1.4 秒内响十几次会变成机关枪。
+func play_sfx(sfx_name: String, pitch: float = 1.0, vol_db: float = 0.0) -> void:
+	if _sfx_players.is_empty() or not _sfx_streams.has(sfx_name):
+		return
+	var p: AudioStreamPlayer = _sfx_players[_sfx_cursor]
+	_sfx_cursor = (_sfx_cursor + 1) % _sfx_players.size()
+	p.stream = _sfx_streams[sfx_name]
+	p.pitch_scale = pitch
+	# 音量复用 BGM 那一个滑块：拉到 0 就该全静音，不给音效单独开设置项
+	p.volume_db = _volume_db(bgm_volume, vol_db)
+	p.play()
+
+
+## 线性音量（0-1）换成播放器用的 dB。0 的时候直接落到最小值：
+## linear_to_db(0) 是 -inf，以前拿 maxf(v, 0.001) 兜底，0% 实际上还留着 -60 dB。
+func _volume_db(linear: float, offset_db: float = 0.0) -> float:
+	if linear <= 0.0001:
+		return SILENT_VOLUME_DB
+	return linear_to_db(linear) + offset_db
+
+
+## 0% 的时候给主总线一个硬静音。播放器压到 -80 dB 已经基本听不见，
+## 但正在播的音效、播片这些通道各自带着偏移量，总线 mute 才是「真的一点声音都没有」。
+func _sync_master_mute() -> void:
+	AudioServer.set_bus_mute(0, bgm_volume <= 0.0001)
+
+
+## 音量滑动条回调
+func _on_volume_changed(value: float) -> void:
+	bgm_volume = value / 100.0
+	bgm_volume = clampf(bgm_volume, 0.0, 1.0)
+	bgm_player.volume_db = _volume_db(bgm_volume)
+	if _deal_sfx_player != null:
+		_deal_sfx_player.volume_db = _volume_db(bgm_volume, DEAL_SFX_DB)
+	if ending_player != null:
+		ending_player.volume_db = _volume_db(bgm_volume)
+	_sync_master_mute()
+	_save_audio_settings()
+	_sync_audio_ui()
+
+
+## 结算动画速度滑块
+func _on_score_speed_changed(value: float) -> void:
+	score_speed = clampf(value / 100.0, SCORE_SPEED_MIN, SCORE_SPEED_MAX)
+	_sync_score_speed_ui()
+	_save_audio_settings()
+
+
+## 同步两处「结算速度」滑块（主菜单设置 + 暂停设置）——它们共用同一个 score_speed
+func _sync_score_speed_ui() -> void:
+	var pct := int(round(score_speed * 100.0))
+	# 光写百分比会有歧义（50% 是更慢还是更快？），补一个方向词
+	var tag := "正常" if is_equal_approx(score_speed, 1.0) else ("更慢" if score_speed < 1.0 else "更快")
+	var txt := "%d%%·%s" % [pct, tag]
+	if score_speed_slider != null:
+		score_speed_slider.set_value_no_signal(score_speed * 100.0)
+	if score_speed_label != null:
+		score_speed_label.text = txt
+	if pause_score_speed_slider != null:
+		pause_score_speed_slider.set_value_no_signal(score_speed * 100.0)
+	if pause_score_speed_label != null:
+		pause_score_speed_label.text = txt
+
+
+## BGM 由局势自动选择，设置按钮只显示当前曲目。
+func _on_switch_bgm() -> void:
+	_update_bgm_state()
+
+
+## 同步两处音频 UI（主菜单设置 + 暂停设置）
+func _sync_audio_ui() -> void:
+	var pct := int(bgm_volume * 100)
+	if audio_volume_slider != null:
+		audio_volume_slider.set_value_no_signal(bgm_volume * 100)
+	if audio_volume_label != null:
+		audio_volume_label.text = "音量：%d%%" % pct
+	if pause_volume_slider != null:
+		pause_volume_slider.set_value_no_signal(bgm_volume * 100)
+	if pause_volume_label != null:
+		pause_volume_label.text = "音量：%d%%" % pct
+	_update_bgm_btn()
+
+
+## 刷新切换 BGM 按钮文字（两处）
+func _update_bgm_btn() -> void:
+	if bgm_switch_btn != null: bgm_switch_btn.hide()
+	if pause_bgm_btn != null: pause_bgm_btn.hide()
+
+
+## The branching panel owns node selection, allocation limits and purchases.
+func _refresh_talent_panel() -> void:
+	if menu_talent_panel != null: menu_talent_panel.call("refresh")
+
+
+func _hide_menu() -> void:
+	# 开始游戏时图鉴理论上点不到（返回按钮才能关），但万一开着就开局，
+	# 它是 MenuLayer(layer 10) 之上的独立层，会直接盖住对局画面 —— 这里关掉保险。
+	_close_knowledge_viewer()
+	menu_root.visible = false
+	_set_hud_visible(true)
+	_set_menu_camera(false)
+
+
+# ==================== 暂停 / 存档 ====================
+## 游戏进行中按下 ESC：弹出暂停菜单（继续游戏 / 设置 / 退出至主菜单）
+func _unhandled_input(event: InputEvent) -> void:
+	if _ending_playing:
+		# 结局播片：点击或 ESC 跳过（跳过的收尾和播完一样）
+		if (event is InputEventKey and event.pressed and not event.echo) \
+				or (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+			_finish_ending()
+			get_viewport().set_input_as_handled()
+		return
+	if _intro_playing:
+		# 开场 PPT：回车/点击先补完打字机、再翻下一张；ESC 直接跳过
+		if event is InputEventKey and event.pressed and not event.echo:
+			if event.keycode == KEY_ESCAPE:
+				_finish_intro()
+			elif event.keycode == KEY_ENTER or event.keycode == KEY_SPACE:
+				_intro_press()
+		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+			_intro_press()
+		return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		_toggle_pause()
+
+
+## Capture release/motion globally so a held card keeps tracking the pointer outside its panel.
+func _input(event: InputEvent) -> void:
+	if _card_press_panel == null:
+		return
+	if event is InputEventMouseMotion:
+		var mouse: Vector2 = event.position
+		if not _card_dragging and mouse.distance_to(_card_press_origin) >= CARD_DRAG_THRESHOLD:
+			_start_card_drag()
+		if _card_dragging:
+			_update_card_drag_pose(mouse, event.relative)
+			get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		_finish_card_pointer(event.position)
+		# The GUI must also receive this release to clear its mouse capture.
+		# Consuming it leaves tooltips bound to the previously pressed card even
+		# after the pointer moves over another card. Release does not stage/click
+		# another card: _on_card_gui_input responds only to a pressed button.
+
+
+func _process_card_drag(delta: float) -> void:
+	if _card_press_panel == null:
+		return
+	if _card_dragging:
+		var info := _find_card_info(_card_press_panel)
+		var on_board: bool = info.get("stage_zone", "preview") == "board"
+		var s := BOARD_CARD_SCALE * 1.08 if on_board and not _is_undo_drop_target(_card_drag_mouse, info) else 1.12
+		var grow := MotionWeb.step(_card_press_panel.scale.x, _card_drag_scale_velocity, s, delta, 430.0, 30.0)
+		var lean := MotionWeb.step(_card_press_panel.rotation, _card_drag_rotation_velocity, _card_drag_lean, delta, 500.0, 34.0)
+		_card_drag_scale_velocity = grow.y
+		_card_drag_rotation_velocity = lean.y
+		_card_press_panel.scale = Vector2(grow.x, grow.x)
+		_card_press_panel.rotation = lean.x
+		_card_drag_lean *= exp(-10.0 * delta)
+		_place_dragged_card()
+		return
+	if not Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT):
+		return
+	_card_press_elapsed += delta
+	if _card_press_elapsed >= CARD_DRAG_HOLD_SEC:
+		_start_card_drag()
+		if _card_dragging:
+			_update_card_drag_pose(get_viewport().get_mouse_position(), Vector2.ZERO)
+
+
+func _start_card_drag() -> void:
+	if _card_press_panel == null or _score_animating or _sort_animating or _paused:
+		return
+	var info := _find_card_info(_card_press_panel)
+	if info.is_empty() or info.get("shaking", false) or (info.get("flying", false) and not info.get("queue_flying", false)):
+		return
+	if info.get("queue_flying", false):
+		CardFlight.stop(_card_press_panel)
+		info["queue_flying"] = false
+		info["flying"] = false
+		info["returning"] = false
+	_card_drag_index = card_infos.find(info)
+	if _card_drag_index < 0:
+		return
+	_card_dragging = true
+	info["dragging"] = true
+	info["hovered"] = false
+	_card_drag_mouse = _card_press_origin if _card_press_origin != Vector2.ZERO else get_viewport().get_mouse_position()
+	_card_drag_last_mouse = _card_drag_mouse
+	_card_drag_grab_offset = _card_press_panel.position + _card_press_panel.pivot_offset - _screen_to_card_box(_card_drag_mouse)
+	_card_drag_grab_point = _card_press_panel.get_global_transform().affine_inverse() * _card_drag_mouse
+	if _card_press_origin == Vector2.ZERO:
+		_card_press_origin = _card_press_panel.get_global_transform() * (_card_press_panel.size * 0.5)
+	_card_press_panel.set_meta("drag_old_z", _card_press_panel.z_index)
+	Motion.cancel(_card_press_panel, "deal")
+	_card_press_panel.modulate.a = 1.0
+	_card_press_panel.z_index = 1000
+	card_box.move_child(_card_press_panel, card_box.get_child_count() - 1)
+	MotionSpring.stop(_card_press_panel, "position")
+	MotionSpring.stop(_card_press_panel, "rotation")
+	MotionSpring.stop(_card_press_panel, "scale")
+	_card_drag_scale_velocity = 0.0
+	_card_drag_rotation_velocity = 0.0
+	_card_drag_lean = 0.0
+	_update_card_stack()
+
+
+func _update_card_drag_pose(mouse_global: Vector2, mouse_delta: Vector2) -> void:
+	if not _card_dragging or not is_instance_valid(_card_press_panel):
+		return
+	_card_drag_mouse = mouse_global
+	var panel := _card_press_panel
+	if mouse_delta != Vector2.ZERO:
+		_card_drag_lean = clampf(mouse_delta.x * 0.012, -0.20, 0.20)
+	_place_dragged_card()
+	_step_card_gyro(panel, _card_gyro_target(panel, mouse_global, true, true), get_process_delta_time())
+	_card_drag_last_mouse = mouse_global
+	_update_drag_play_hint(mouse_global)
+	_update_staged_drag_preview(mouse_global)
+
+
+func _place_dragged_card() -> void:
+	var panel := _card_press_panel
+	# Size, angle and grabbed-point placement are updated by the same frame owner.
+	panel.position = _screen_to_card_box(_card_drag_mouse) - panel.pivot_offset - ((_card_drag_grab_point - panel.pivot_offset) * panel.scale).rotated(panel.rotation)
+
+
+func _staged_row_without_drag() -> Array:
+	var row: Array = []
+	for entry in card_infos:
+		if entry.get("staged_by_drag", false) and entry["panel"] != _card_press_panel:
+			row.append(entry)
+	row.sort_custom(func(a, b): return int(a.get("stage_order", 0)) < int(b.get("stage_order", 0)))
+	return row
+
+
+func _staged_insert_slot(point: Vector2, count: int) -> int:
+	if count <= 1:
+		return 0
+	var on_board := _is_board_drop_target(point)
+	var spacing := BOARD_CARD_SPACING if on_board else STAGED_CARD_SPACING
+	var center := _screen_to_card_box(staged_board.get_global_rect().get_center()).x if on_board else card_box.size.x * 0.5
+	var first_center := center - float(count - 1) * 0.5 * spacing
+	# Use fixed slot centers: animated neighbours must not feed back into picking.
+	return clampi(roundi((_screen_to_card_box(point).x - first_center) / spacing), 0, count - 1)
+
+
+func _staged_queue_insert_index(point: Vector2, row: Array) -> int:
+	var zone := "board" if _is_board_drop_target(point) else "preview"
+	var visible: Array = []
+	for entry in row:
+		if entry.get("stage_zone", "preview") == zone: visible.append(entry)
+	if visible.is_empty(): return row.size()
+	var slot := _staged_insert_slot(point, visible.size() + 1)
+	return row.find(visible[slot]) if slot < visible.size() else row.find(visible.back()) + 1
+
+
+func _update_staged_drag_preview(point: Vector2) -> void:
+	var row := _staged_row_without_drag()
+	var dragged := _find_card_info(_card_press_panel)
+	if dragged.is_empty():
+		return
+	if _is_play_drop_target(point) and not _is_undo_drop_target(point, dragged):
+		var slot := _staged_queue_insert_index(point, row) if dragged.get("staged_by_drag", false) else row.size()
+		row.insert(slot, dragged)
+	elif dragged.get("staged_by_drag", false):
+		row.append(dragged)
+		row.sort_custom(func(a, b): return int(a.get("stage_order", 0)) < int(b.get("stage_order", 0)))
+	_layout_staged_cards(row)
+
+
+func _is_play_drop_target(point: Vector2) -> bool:
+	if card_box == null or not is_instance_valid(card_box):
+		return false
+	if _is_board_drop_target(point): return true
+	var info := _find_card_info(_card_press_panel)
+	if not info.is_empty() and not info.get("selected", false):
+		var swipe := point - _card_press_origin
+		if swipe.y <= -CARD_PLAY_SWIPE and absf(swipe.x) < -swipe.y * 2.5 + 18.0:
+			return true
+	var hand_rect := card_box.get_global_rect()
+	return point.x >= hand_rect.position.x and point.x <= hand_rect.end.x \
+		and point.y >= hand_rect.position.y - 274.0 and point.y < hand_rect.position.y - 8.0
+
+
+func _update_drag_play_hint(point: Vector2) -> void:
+	if drag_play_hint == null or not is_instance_valid(drag_play_hint):
+		return
+	var info := _find_card_info(_card_press_panel)
+	var undo := _is_undo_drop_target(point, info)
+	var show_hint := _card_dragging and (_is_play_drop_target(point) or undo)
+	drag_play_hint.visible = show_hint
+	if not show_hint:
+		return
+	var reason := "" if not info.is_empty() and info["selected"] else _card_selection_error(info)
+	if undo or reason.is_empty():
+		drag_play_hint.text = ("松手退回牌库并退费" if info.get("dispatched", false) else "松手回到手牌") if undo else ("松手放下" if info.get("selected", false) else "松手出牌")
+		drag_play_hint.add_theme_color_override("font_color", Color("a8f0c1"))
+	else:
+		drag_play_hint.text = reason + " · 松手返回手牌"
+		drag_play_hint.add_theme_color_override("font_color", Color("ff9185"))
+	var vp_width := get_viewport().get_visible_rect().size.x
+	drag_play_hint.size = drag_play_hint.get_combined_minimum_size()
+	var hint_center_x := point.x
+	var hint_y := point.y - 130.0
+	if not info.is_empty():
+		var panel: Control = info["panel"]
+		var transform := panel.get_global_transform()
+		hint_center_x = (transform * (panel.size * 0.5)).x
+		var top := INF
+		for corner in [Vector2.ZERO, Vector2(panel.size.x, 0), panel.size, Vector2(0, panel.size.y)]:
+			top = minf(top, (transform * corner).y)
+		hint_y = top - maxf(drag_play_hint.size.y, 24.0) - 12.0
+	drag_play_hint.position = Vector2(clampf(hint_center_x - drag_play_hint.size.x * 0.5, 8.0, maxf(8.0, vp_width - drag_play_hint.size.x - 8.0)), maxf(8.0, hint_y))
+
+
+func _is_board_drop_target(point: Vector2) -> bool:
+	return is_instance_valid(staged_board) and staged_board.is_visible_in_tree() and staged_board.get_global_rect().grow(12.0).has_point(point)
+
+
+func _is_undo_drop_target(point: Vector2, info: Dictionary) -> bool:
+	if info.is_empty() or not info.get("staged_by_drag", false): return false
+	var swipe := point - _card_press_origin
+	return swipe.y >= CARD_UNDO_SWIPE and swipe.y > absf(swipe.x) * 0.65 \
+		and not _is_board_drop_target(point)
+
+
+func _finish_card_pointer(mouse_global: Vector2) -> void:
+	var panel := _card_press_panel
+	if panel == null:
+		return
+	if _card_dragging:
+		var info := _find_card_info(panel)
+		_update_card_drag_pose(mouse_global, mouse_global - _card_drag_last_mouse)
+		var drop_to_table := _is_play_drop_target(mouse_global)
+		var undo := _is_undo_drop_target(mouse_global, info)
+		if not info.is_empty():
+			info["dragging"] = false
+		_card_dragging = false
+		_card_drag_index = -1
+		if drag_play_hint != null:
+			drag_play_hint.visible = false
+		panel.z_index = int(panel.get_meta("drag_old_z", 0))
+		if not info.is_empty() and not _paused and not _score_animating and not _sort_animating:
+			if undo:
+				_return_staged_to_hand(info)
+			elif drop_to_table:
+				# Dragging onto the table is the only way to queue a hand card.
+				if not info.get("selected", false):
+					var reason := _card_selection_error(info)
+					if reason.is_empty():
+						info["selected"] = true
+						info["tier"] = play_tier
+						info["staged_by_drag"] = true
+						info["stage_order"] = _next_stage_order()
+						var direct := _is_board_drop_target(mouse_global)
+						info["stage_zone"] = "board" if direct else "preview"
+						info["preview_left"] = 0.0 if direct else STAGED_PREVIEW_SEC
+						if info.get("dispatched", false): info["tier"] = GameState.DISPATCH_TIER
+						_apply_gold_frame(panel)
+						_update_card_face(info)
+						var released_pos := panel.position
+						_layout_fan(true)
+						panel.position = released_pos
+						MotionSpring.to(panel, "position", info["base_pos"], 410.0, 25.0)
+						if impact_feedback != null:
+							impact_feedback.pulse(panel, Color("e0cf7b"), 0.7)
+						play_sfx("land", 1.1, -12.0)
+						_update_selected_label()
+					else:
+						_layout_fan(true)
+						_reject_card(panel, reason)
+				elif info.get("staged_by_drag", false):
+					# A table card can be dragged to reorder the pending play row.
+					if _is_board_drop_target(mouse_global):
+						info["stage_zone"] = "board"
+						info["preview_left"] = 0.0
+					else:
+						info["stage_zone"] = "preview"
+						info["preview_left"] = STAGED_PREVIEW_SEC
+					info["stage_order"] = _stage_order_from_drop(mouse_global)
+					var released_pos := panel.position
+					_layout_fan(true)
+					panel.position = released_pos
+					MotionSpring.to(panel, "position", info["base_pos"], 410.0, 25.0)
+			else:
+				if info.get("staged_by_drag", false):
+					var released_pos := panel.position
+					if drop_to_table:
+						_stage_order_from_drop(mouse_global)
+					_layout_fan(true)
+					panel.position = released_pos
+					MotionSpring.to(panel, "position", info["base_pos"], 410.0, 25.0)
+				else:
+					_reorder_hand_on_drop(info, mouse_global)
+			for entry in card_infos:
+				var entry_panel: PanelContainer = entry["panel"]
+				if not is_instance_valid(entry_panel):
+					continue
+				if entry.get("staged_by_drag", false) or entry.get("shaking", false) or entry.get("flying", false):
+					continue
+				var goal: Vector2 = entry["base_pos"] + entry["radial"] * (CARD_RAISE if entry["selected"] else 0.0)
+				MotionSpring.to(entry_panel, "position", goal, 390.0, 24.0)
+				MotionSpring.to(entry_panel, "rotation", float(entry["theta"]), 460.0, 30.0)
+				MotionSpring.to(entry_panel, "scale", Vector2.ONE, 390.0, 28.0)
+			_step_card_gyro(panel, Vector2.ZERO, 0.06)
+		var settled_row: Array = []
+		for entry in card_infos:
+			if entry.get("staged_by_drag", false):
+				settled_row.append(entry)
+		settled_row.sort_custom(func(a, b): return int(a.get("stage_order", 0)) < int(b.get("stage_order", 0)))
+		_layout_staged_cards(settled_row)
+		_update_card_stack()
+	else:
+		# Selection is now deliberate: cards enter the pending row only by dragging upward.
+		pass
+	_card_press_panel = null
+	_card_press_elapsed = 0.0
+	_card_press_origin = Vector2.ZERO
+	_card_drag_index = -1
+	if drag_play_hint != null:
+		drag_play_hint.visible = false
+	_update_selected_label()
+	_refresh_action_buttons()
+
+
+func _return_staged_to_hand(info: Dictionary) -> void:
+	var panel: PanelContainer = info["panel"]
+	if info.get("dispatched", false):
+		if not GameState.cancel_dispatch(str(info["card_id"])): return
+		card_infos.erase(info)
+		panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		info["selected"] = false
+		info["staged_by_drag"] = false
+		info["returning"] = true
+		var source := deck_root.get_global_rect().get_center()
+		if not deck_backs.is_empty():
+			var back: Control = deck_backs.back()
+			source = back.get_global_transform() * (back.size * 0.5)
+		info["base_pos"] = _screen_to_card_box(source) - panel.pivot_offset - (panel.size * 0.5 - panel.pivot_offset) * 0.32
+		_fly_queue_card(info, Vector2(0.32, 0.32), 0.0, 0.44, 54.0)
+		var flight := panel.get_node_or_null("CardFlight")
+		if flight: flight.completed = panel.queue_free
+		else: panel.queue_free()
+		_layout_fan(true)
+		_update_selected_label()
+		_update_hud()
+		play_sfx("land", 0.92, -15.0)
+		return
+	info["selected"] = false
+	info["staged_by_drag"] = false
+	info["stage_order"] = -1
+	info["stage_zone"] = "hand"
+	info["preview_left"] = 0.0
+	info["tier"] = GameState.DISPATCH_TIER if info.get("dispatched", false) else ""
+	info["returning"] = true
+	info["flying"] = true
+	_remove_gold_frame(panel)
+	_update_card_face(info)
+	_layout_fan(true)
+	_fly_queue_card(info, Vector2.ONE, float(info["theta"]), 0.44, 54.0)
+	play_sfx("land", 0.92, -15.0)
+	_update_selected_label()
+
+
+func _is_hand_drop_target(point: Vector2) -> bool:
+	return card_box != null and card_box.get_global_rect().has_point(point)
+
+
+func _next_stage_order() -> int:
+	var next := 0
+	for info in card_infos:
+		if info.get("staged_by_drag", false):
+			next = maxi(next, int(info.get("stage_order", -1)) + 1)
+	return next
+
+
+func _stage_order_from_drop(point: Vector2) -> int:
+	var row_infos := _staged_row_without_drag()
+	var insert_at := _staged_queue_insert_index(point, row_infos)
+	row_infos.insert(insert_at, _find_card_info(_card_press_panel))
+	for i in row_infos.size():
+		row_infos[i]["stage_order"] = i
+	return insert_at
+
+
+func _ordered_staged_indices() -> Array:
+	var indices: Array = []
+	for i in card_infos.size():
+		if card_infos[i].get("selected", false):
+			indices.append(i)
+	indices.sort_custom(func(a, b):
+		var ia: Dictionary = card_infos[a]
+		var ib: Dictionary = card_infos[b]
+		return int(ia.get("stage_order", 2147483647)) < int(ib.get("stage_order", 2147483647)))
+	return indices
+
+
+func _reorder_hand_on_drop(dragged: Dictionary, mouse_global: Vector2) -> bool:
+	if card_infos.size() < 2 or not card_box.get_global_rect().has_point(mouse_global):
+		return false
+	var old_index := card_infos.find(dragged)
+	if old_index < 0:
+		return false
+	var drop_x := _screen_to_card_box(mouse_global).x
+	var insert_at := 0
+	for entry in card_infos:
+		if entry == dragged:
+			continue
+		var other_panel: PanelContainer = entry["panel"]
+		var center_x: float = float(entry["base_pos"].x) + other_panel.pivot_offset.x
+		if drop_x > center_x:
+			insert_at += 1
+	if insert_at == old_index:
+		return false
+	var positions: Dictionary = {}
+	for entry in card_infos:
+		var p: PanelContainer = entry["panel"]
+		positions[p] = {"position": p.position, "rotation": p.rotation}
+	card_infos.remove_at(old_index)
+	card_infos.insert(insert_at, dragged)
+	_layout_fan()
+	for entry in card_infos:
+		var p: PanelContainer = entry["panel"]
+		var old_pose: Dictionary = positions[p]
+		p.position = old_pose["position"]
+		p.rotation = old_pose["rotation"]
+	return true
+
+
+func _can_pause() -> bool:
+	# 算分动画期间禁止暂停：_paused 是自定义变量、不是 get_tree().paused，
+	# tween 在「暂停」下照常跑，放行只会得到「暂停菜单下面还在飞牌」的画面。
+	return _playing and not GameState.game_over and not crisis_root.visible and not _score_animating
+
+
+func _toggle_pause() -> void:
+	if not _can_pause():
+		return
+	if _paused:
+		_resume_game()
+	else:
+		_pause_game()
+
+
+func _pause_game() -> void:
+	if _card_press_panel != null:
+		_finish_card_pointer(_card_press_origin)
+	_paused = true
+	if sandpan_view: sandpan_view.set_paused(true)
+	if wetland: wetland.set_process(false)
+	pause_hint.text = ""
+	pause_settings_panel.visible = false
+	pause_panel.visible = true
+	pause_root.visible = true
+
+
+func _resume_game() -> void:
+	_paused = false
+	if sandpan_view: sandpan_view.set_paused(false)
+	if wetland: wetland.set_process(true)
+	pause_root.visible = false
+
+
+func _on_pause_settings() -> void:
+	pause_panel.visible = false
+	pause_settings_panel.visible = true
+	_sync_audio_ui()   # 打开时同步主菜单设置
+
+
+func _on_pause_settings_back() -> void:
+	pause_settings_panel.visible = false
+	pause_panel.visible = true
+
+
+## 退出至主菜单：先存档，保留本局进度
+func _on_pause_exit() -> void:
+	save_game()
+	_paused = false
+	pause_root.visible = false
+	popup_root.visible = false
+	hand_panel.visible = false
+	bottom_right.visible = false
+	tier_lever.visible = false
+	_playing = false
+	_show_menu()
+
+
+## 主菜单「继续游戏」：读档续玩
+func _on_continue_pressed() -> void:
+	if not load_game():
+		menu_hint.text = "没有可继续的进度"
+
+
+func has_save() -> bool:
+	return FileAccess.file_exists(SAVE_PATH)
+
+
+func _clear_save() -> void:
+	if has_save():
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
+
+
+func save_game() -> void:
+	var hand_ids: Array = []
+	var dispatched_hand_ids: Array = []
+	var staged_queue: Array = []
+	for info in card_infos:
+		if not info.get("dispatched", false):
+			hand_ids.append(info["card_id"])
+		elif not info.get("selected", false):
+			dispatched_hand_ids.append(info["card_id"])
+	for idx in _ordered_staged_indices():
+		var staged: Dictionary = card_infos[idx]
+		staged_queue.append({
+			"card_id": staged["card_id"], "dispatched": staged.get("dispatched", false),
+			"tier": _info_tier(staged)})
+	var data := {
+		"state": GameState.serialize(),
+		"hand_ids": hand_ids,
+		"staged_queue": staged_queue,
+		"dispatched_hand_ids": dispatched_hand_ids,
+		"refresh_used_turn": _refresh_used_turn,
+		"phase": _current_phase,
+		"event_text": _current_event,
+	}
+	if _current_phase != "allocate":
+		data["popup"] = {
+			"title": popup_title.text,
+			"body": popup_body.text,
+			"button": popup_button.text,
+		}
+		if _current_phase == "popup_knowledge" and not _knowledge_popup_card_id.is_empty():
+			data["popup"]["knowledge_id"] = _knowledge_popup_card_id
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f != null:
+		f.store_string(JSON.stringify(data))
+		f.close()
+
+
+func load_game() -> bool:
+	if not has_save():
+		return false
+	var f := FileAccess.open(SAVE_PATH, FileAccess.READ)
+	if f == null:
+		return false
+	var text := f.get_as_text()
+	f.close()
+	var data = JSON.parse_string(text)
+	if data == null or not (data is Dictionary):
+		return false
+	var phase: String = str(data.get("phase", "allocate"))
+	var state: Dictionary = data.get("state", {})
+	# 旧分配阶段存档漏记刷新费：由总预算、现有资金和已付款恢复。
+	# 结算阶段资金已转入结转，不能把结转误认为刷新支出。
+	if phase == "allocate" and state.has("turn_budget") and not state.has("turn_other_spent"):
+		state["turn_other_spent"] = maxi(0, int(state["turn_budget"]) - int(state.get("funds", 0)) - int(state.get("turn_card_spent", 0)))
+	GameState.load_state(state)
+	GameState.restore_crisis_notices(GameState.turn if phase in ["allocate", "popup_event"] else GameState.turn + 1)
+	_refresh_used_turn = int(data.get("refresh_used_turn", GameState.turn if GameState.turn_other_spent >= GameState.REFRESH_HAND_COST else -1))
+	_update_threshold_lines()
+	_hide_menu()
+	_playing = true
+	_paused = false
+	_current_event = str(data.get("event_text", ""))
+	_banner_override = ""   # 读档后横幅直接显示当前态势，不继承上一局的危机残留
+	_update_hud()
+	_update_3d()
+	_current_phase = phase
+	var popup: Dictionary = data.get("popup", {})
+	match phase:
+		"popup_event":
+			_show_popup("第 %d 回合 · 事件" % GameState.turn, str(popup.get("body", "")), "开始分配资金", _enter_allocate)
+		"popup_knowledge":
+			var kid := str(popup.get("knowledge_id", ""))
+			if not GameState.KNOWLEDGE_CARDS.has(kid):
+				# Older saves kept only the title; recover its photograph by name.
+				for old_id in GameState.KNOWLEDGE_CARDS:
+					if str(popup.get("title", "")) == "知识卡 · %s" % GameState.KNOWLEDGE_CARDS[old_id]["name"]:
+						kid = str(old_id)
+						break
+			if GameState.KNOWLEDGE_CARDS.has(kid): _show_knowledge(kid)
+			else: _show_popup(str(popup.get("title", "")), str(popup.get("body", "")), "收下(继续)", _on_resolve_continue)
+		"popup_settlement":
+			_show_popup("结算反馈", str(popup.get("body", "")), "继续", _on_resolve_continue)
+		_:
+			_restore_hand(data)
+	return true
+
+
+## 恢复分配阶段：重建手牌并还原选中状态
+func _restore_hand(data: Dictionary) -> void:
+	var hand_ids: Array = data.get("hand_ids", [])
+	# Old saves used selected_ids; migrate those cards into the new table queue.
+	var staged_queue: Array = data.get("staged_queue", [])
+	if staged_queue.is_empty():
+		for old_id in data.get("staged_ids", data.get("selected_ids", [])):
+			staged_queue.append({"card_id": str(old_id), "dispatched": false, "tier": ""})
+	current_hand = []
+	for cid in hand_ids:
+		var card: Dictionary = GameState._find_card(cid)
+		if not card.is_empty():
+			current_hand.append(card)
+	play_deal_anim = false
+	_build_hand_panel()
+	var restored_panels: Array[PanelContainer] = []
+	for info in card_infos:
+		if info.get("dispatched", false) and data.get("dispatched_hand_ids", []).has(info["card_id"]):
+			info["selected"] = false
+			info["staged_by_drag"] = false
+			info["stage_order"] = -1
+			info["stage_zone"] = "hand"
+			_remove_gold_frame(info["panel"])
+	for i in staged_queue.size():
+		var staged: Dictionary = staged_queue[i]
+		var cid: String = str(staged.get("card_id", ""))
+		var was_dispatched: bool = staged.get("dispatched", false)
+		for info in card_infos:
+			var panel: PanelContainer = info["panel"]
+			if info["card_id"] == cid and info.get("dispatched", false) == was_dispatched \
+				and not restored_panels.has(panel):
+				info["selected"] = true
+				info["staged_by_drag"] = true
+				info["stage_order"] = i
+				info["stage_zone"] = "board"
+				info["preview_left"] = 0.0
+				var saved_tier: String = str(staged.get("tier", ""))
+				info["tier"] = saved_tier if saved_tier != "" else _info_tier(info)
+				_update_card_face(info)
+				_apply_gold_frame(panel)
+				restored_panels.append(panel)
+				break
+	_layout_fan()
+	var next_order := staged_queue.size()
+	for info in card_infos:
+		if info.get("staged_by_drag", false) and not restored_panels.has(info["panel"]):
+			info["stage_order"] = next_order
+			next_order += 1
+	hand_panel.visible = true
+	bottom_right.visible = true
+	tier_lever.visible = true
+	_slide_side_panels(false)
+	_update_selected_label()
+
+
+## 暂停菜单：盖在 HUD 与沙盘之上的独立层
+func _build_pause_menu() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "PauseLayer"
+	layer.layer = 20
+	add_child(layer)
+
+	pause_root = Control.new()
+	pause_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	pause_root.visible = false
+	layer.add_child(pause_root)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.55)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	pause_root.add_child(dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	pause_root.add_child(center)
+
+	pause_panel = PanelContainer.new()
+	pause_panel.custom_minimum_size = Vector2(360, 0)
+	_panel_style(pause_panel, Color(0.24, 0.17, 0.11, 0.96))
+	center.add_child(pause_panel)
+
+	var pv := VBoxContainer.new()
+	pv.add_theme_constant_override("separation", 12)
+	pause_panel.add_child(pv)
+
+	var t := _make_label("暂停", 30, Color(1, 0.9, 0.55))
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pv.add_child(t)
+
+	pause_hint = _make_label("", 13, Color(1, 0.6, 0.5))
+	pause_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pv.add_child(pause_hint)
+
+	var b_resume := _make_button("继续游戏", _resume_game, 22)
+	b_resume.custom_minimum_size = Vector2(0, 52)
+	pv.add_child(b_resume)
+
+	var b_settings := _make_button("设置", _on_pause_settings, 18)
+	b_settings.custom_minimum_size = Vector2(0, 46)
+	pv.add_child(b_settings)
+
+	var b_exit := _make_button("退出至主菜单", _on_pause_exit, 18)
+	b_exit.custom_minimum_size = Vector2(0, 46)
+	pv.add_child(b_exit)
+
+	# --- 暂停设置面板（与主菜单设置同步） ---
+	pause_settings_panel = PanelContainer.new()
+	pause_settings_panel.custom_minimum_size = Vector2(400, 0)
+	_panel_style(pause_settings_panel, Color(0.24, 0.17, 0.11, 0.96))
+	pause_settings_panel.visible = false
+	center.add_child(pause_settings_panel)
+
+	var psv := VBoxContainer.new()
+	psv.add_theme_constant_override("separation", 12)
+	pause_settings_panel.add_child(psv)
+
+	var ps_title := _make_label("设置", 24, Color(1, 0.9, 0.55))
+	ps_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	psv.add_child(ps_title)
+
+	var ps_sep := HSeparator.new()
+	psv.add_child(ps_sep)
+
+	var pvol_controls := VBoxContainer.new()
+	pvol_controls.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pvol_controls.add_theme_constant_override("separation", 2)
+	psv.add_child(pvol_controls)
+	pause_volume_slider = HSlider.new()
+	pause_volume_slider.min_value = 0
+	pause_volume_slider.max_value = 100
+	pause_volume_slider.step = 1
+	pause_volume_slider.value = bgm_volume * 100
+	pause_volume_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	pause_volume_slider.value_changed.connect(_on_volume_changed)
+	pvol_controls.add_child(pause_volume_slider)
+	pause_volume_label = _make_label("音量：%d%%" % int(bgm_volume * 100), 14, Color(1, 0.95, 0.6))
+	pause_volume_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	pvol_controls.add_child(pause_volume_label)
+
+	# 主菜单那份设置面板一直有「返回」，暂停里这份 0.1.28 起只剩音量 —— 补回来，
+	# 否则进设置之后只能靠 Esc 猜着退，玩家找不到出口。
+	var ps_back := _make_button("返回", _on_pause_settings_back, 16)
+	ps_back.custom_minimum_size = Vector2(0, 40)
+	psv.add_child(ps_back)
+
+	_update_bgm_btn()        # 同步两个切换按钮文字
+	_sync_score_speed_ui()   # 两个结算速度滑块的文字也要填上（建的时候标签是空的）
+
+
+# ==================== 危机警示 ====================
+## 危机预警信号：入队，逐个弹出大红警示
+func _on_crisis_warn(crisis: Dictionary) -> void:
+	GameState.record_crisis_notice(crisis, 1)
+	GameState.record_crisis_notice(GameState.forecast_crisis, 2)
+	_refresh_warn_bar()
+	_crisis_queue.append({"crisis": crisis, "is_warning": true})
+	_process_crisis_queue()
+
+
+## 危机爆发信号：入队，逐个弹出大红警示
+func _on_crisis_hit(crisis: Dictionary) -> void:
+	GameState.record_crisis_notice(crisis, 0)
+	_refresh_warn_bar()
+	_crisis_queue.append({"crisis": crisis, "is_warning": false})
+	_process_crisis_queue()
+
+
+func _process_crisis_queue() -> void:
+	if GameState.game_over:
+		return  # 已判负：失败报告优先，危机弹层不再抢屏
+	if _score_animating:
+		return  # 算分动画期间先攒着：危机预警/爆发已挪到回合末发射，
+				# 此刻弹出来会糊在结算动画与结算弹窗上。
+				# 队列不会丢 —— _finish_turn 在结算弹窗铺好后会再调一次本函数。
+	if _crisis_queue.is_empty() or crisis_root.visible:
+		return
+	var item: Dictionary = _crisis_queue.pop_front()
+	_show_crisis_alert(item["crisis"], item["is_warning"])
+
+
+## 玩家点掉危机弹窗：还有下一个危机就继续弹，否则（无事件弹窗时）进入分配
+func _on_crisis_dismiss() -> void:
+	crisis_root.visible = false
+	_banner_override = ""   # 危机弹层让出横幅，回到实时态势
+	if not _crisis_queue.is_empty():
+		_process_crisis_queue()
+	elif not popup_root.visible:
+		_enter_allocate()
+
+
+## 弹出危机警示：大红叹号 + 屏幕红闪 + 雷霆大字 + 详细说明
+func _show_crisis_alert(crisis: Dictionary, is_warning: bool) -> void:
+	var name: String = crisis["name"]
+	crisis_title.text = name
+	crisis_tag.text = "⚠ 危机预警" if is_warning else "⚠ 危机爆发"
+	crisis_button.text = "知道了" if is_warning else "继续"
+	crisis_body.text = _crisis_body_text(crisis, is_warning)
+	# 危机同步到顶部横幅：危机期间横幅让位给危机（_banner_override），
+	# 弹层关掉后自动回到实时态势（见 _on_crisis_dismiss / _refresh_event_banner）。
+	_banner_override = "⚠ %s · %s" % [("危机预警" if is_warning else "危机爆发"), name]
+	_update_hud()
+
+	crisis_root.visible = true
+	# 淡红脉冲：起手轻轻亮一下，随后持续柔和脉冲（不再刺眼）
+	crisis_dim.color.a = 0.28
+	var pulse := Motion.tween(crisis_dim, "pulse", "warning").set_loops()
+	Motion.curve(pulse, "sine.inOut")
+	pulse.tween_property(crisis_dim, "color:a", 0.10, 0.6)
+	pulse.tween_property(crisis_dim, "color:a", 0.28, 0.6)
+	# 像素感叹号：大小脉冲（像在跳动），动画保持不变
+	crisis_icon.pivot_offset = crisis_icon.size * 0.5
+	var tw := Motion.tween(crisis_icon, "pulse", "warning").set_loops()
+	Motion.curve(tw, "sine.inOut")
+	tw.tween_property(crisis_icon, "scale", Vector2(1.22, 1.22), 0.45)
+	tw.tween_property(crisis_icon, "scale", Vector2.ONE, 0.45)
+
+
+## 危机的「会造成什么」逐条文案（预警与爆发共用）
+func _crisis_effect_lines(crisis: Dictionary) -> Array:
+	var out: Array = []
+	for e in crisis.get("effects", []):
+		out.append("· %s %+d" % [GameState.METRIC_NAMES.get(e["metric"], e["metric"]), int(e["delta"])])
+	for e in crisis.get("legacy_effects", []):
+		if str(e["kind"]) == "food":
+			out.append("· 候鸟食物 %+d(持续至本年冬末，可修复)" % int(e["delta"]))
+		else:
+			out.append("· 秋季水位遗留 %+d(秋季开局一次生效)" % int(e["delta"]))
+	if bool(crisis.get("migrant_only", false)):
+		out.append("· 鸟群损失最多为当季候鸟，不扣种群基数；未恢复损失折半影响次年迁入。")
+	for settled in crisis.get("legacy_settled", []):
+		out.append("· 第 %d 回合遗留已生效：水位 %+d" % [int(settled["turn"]), int(settled["delta"])])
+	return out
+
+
+## 危机警示正文：描述 + 「当前 xx 值较低，可能影响 xx」 + 应对建议
+func _crisis_body_text(crisis: Dictionary, is_warning: bool) -> String:
+	var c := _parse_cond(str(crisis.get("cond", "")))
+	var metric := str(c.get("metric", ""))
+	var mname := str(GameState.METRIC_NAMES.get(metric, metric))
+	var cur := int(GameState.metrics.get(metric, 0))
+	var op := str(c.get("op", "<"))
+	var low_high := "偏低" if op in ["<", "<="] else "偏高"
+	var threshold := int(c.get("threshold", 0))
+
+	var effect_lines: Array = _crisis_effect_lines(crisis)
+
+	var body := ""
+	if is_warning:
+		body += "%s\n\n" % crisis["warn"]
+		if bool(crisis.get("mitigation", false)):
+			body += "[color=#8fd0ff]对应牌可减伤：基础 50% / 有效 80% / 深度 100%。下批手牌保底一张当季对策。[/color]\n\n"
+		# 只在当前值真的落在危险侧时才提示，避免出现「当前水质 90（偏低）」这种自相矛盾的话。
+		# ⚠ 这里**不写**危机的「触发阈值」：那和 HUD 上的「生态红线」（致死线）是两回事
+		#   （水质触发线 55，致死线简单/普通/困难 = 15/25/35），两个词又太像，
+		#   写出来玩家会以为是同一个数、进而误判自己离死还有多远，反而更糟。
+		if metric != "" and not bool(crisis.get("seasonal_social", false)) and _cond_holds(cur, op, threshold):
+			body += "[color=#ffb060]⚠ 当前%s %d(%s)[/color]\n\n" % [mname, cur, low_high]
+		body += "[color=#ff9090]若未及时应对，下一回合可能造成：[/color]\n"
+		body += "\n".join(effect_lines)
+		var counters: Array = GameState.counter_ids_for(crisis)
+		if not counters.is_empty():
+			var names: Array = []
+			for cid in counters:
+				names.append(_card_name(cid))
+			# 标签匹配后对策卡可能有 4~6 张，只列前 4 张，免得这段撑爆弹窗
+			var shown: Array = names.slice(0, 4)
+			var tail: String = "" if names.size() <= 4 else " 等 %d 张" % names.size()
+			# 对策卡是「大概率入手」而不是必出（肉鸽要有没抽到的局面），文案不承诺保底
+			body += "\n\n[color=#8fd0ff]应对建议：「%s」%s[/color]" % ["」「".join(shown), tail]
+		# 深预警（科研点累计达标后开启）：把「2 回合后」那一场一并预告出来 ——
+		# 这就是科研点的实际作用，写在弹窗里玩家才知道那个数字不只是评分。
+		var fc: Dictionary = GameState.forecast_crisis
+		if not fc.is_empty():
+			body += "\n\n[color=#a9b7c6]── 深预警 · 2 回合后 ──[/color]\n"
+			body += "[color=#ffb060]%s[/color]\n" % str(fc.get("name", "?"))
+			body += "\n".join(_crisis_effect_lines(fc))
+			var fc_counters: Array = GameState.counter_ids_for(fc)
+			if not fc_counters.is_empty():
+				var fnames: Array = []
+				for cid in fc_counters:
+					fnames.append(_card_name(cid))
+				var fshown: Array = fnames.slice(0, 4)
+				var ftail: String = "" if fnames.size() <= 4 else " 等 %d 张" % fnames.size()
+				body += "\n[color=#8fd0ff]可提前布局：%s%s[/color]" % ["」「".join(fshown), ftail]
+	else:
+		body += "%s\n\n" % crisis["hit"]
+		body += "[color=#ff9090]本次已造成：[/color]\n"
+		body += "\n".join(effect_lines)
+	if crisis.has("lesson"):
+		body += "\n\n[color=#b6d6ae]生态提示：%s[/color]" % str(crisis["lesson"])
+	return body
+
+
+## 解析危机 cond（如 "water_level < 45"）→ {metric, op, threshold}
+func _parse_cond(cond: String) -> Dictionary:
+	return GameState._parse_cond_simple(cond)
+
+
+## 当前值是否真的落在危机条件那一侧（安全区不报警）
+func _cond_holds(cur: int, op: String, threshold: int) -> bool:
+	match op:
+		"<": return cur < threshold
+		"<=": return cur <= threshold
+		">": return cur > threshold
+		">=": return cur >= threshold
+		"==": return cur == threshold
+	return false
+
+
+## 危机警示弹层（盖在普通弹窗之上）
+func _build_crisis_alert() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "CrisisLayer"
+	layer.layer = 5
+	add_child(layer)
+
+	crisis_root = Control.new()
+	crisis_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	crisis_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	crisis_root.visible = false
+	layer.add_child(crisis_root)
+
+	crisis_dim = ColorRect.new()
+	crisis_dim.color = Color(1.0, 0.55, 0.55, 0.22)   # 淡红，不再刺眼
+	crisis_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	crisis_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	crisis_root.add_child(crisis_dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	crisis_root.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(560, 0)
+	_panel_style(panel, Color(0.30, 0.12, 0.10, 0.97))
+	center.add_child(panel)
+
+	var pv := VBoxContainer.new()
+	pv.add_theme_constant_override("separation", 10)
+	panel.add_child(pv)
+
+	# 像素感叹号（贴图，最近邻放大保持锐利）
+	var exclaim_grid := "..##..\n.#XX#.\n.#XX#.\n.#XX#.\n.#XX#.\n.#XX#.\n.#XX#.\n..##..\n......\n.#XX#.\n..##.."
+	var exclaim_c := Color(1.0, 0.32, 0.28)
+	crisis_icon = TextureRect.new()
+	crisis_icon.texture = _pixel_icon(exclaim_grid, exclaim_c, exclaim_c.darkened(0.42), exclaim_c.lightened(0.25))
+	crisis_icon.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	crisis_icon.stretch_mode = TextureRect.STRETCH_SCALE
+	crisis_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	crisis_icon.custom_minimum_size = Vector2(52, 96)
+	crisis_icon.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	pv.add_child(crisis_icon)
+
+	crisis_title = _make_label("", 44, Color(1.0, 0.30, 0.25))
+	crisis_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	crisis_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	crisis_title.add_theme_color_override("font_outline_color", Color(0.55, 0.0, 0.0, 0.85))
+	crisis_title.add_theme_constant_override("outline_size", 8)
+	pv.add_child(crisis_title)
+
+	crisis_tag = _make_label("", 18, Color(1.0, 0.55, 0.45))
+	crisis_tag.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pv.add_child(crisis_tag)
+
+	crisis_body = RichTextLabel.new()
+	crisis_body.bbcode_enabled = true
+	crisis_body.fit_content = false
+	crisis_body.scroll_active = true
+	crisis_body.custom_minimum_size = Vector2(500, 280)
+	crisis_body.add_theme_font_size_override("normal_font_size", _snap_px(16))
+	crisis_body.add_theme_color_override("default_color", Color(0.98, 0.95, 0.92))
+	pv.add_child(crisis_body)
+
+	crisis_button = _make_button("知道了", _on_crisis_dismiss, 20)
+	crisis_button.custom_minimum_size = Vector2(0, 50)
+	pv.add_child(crisis_button)
+	_resize_crisis_alert()
+	get_viewport().size_changed.connect(_resize_crisis_alert)
+
+func _resize_crisis_alert() -> void:
+	if crisis_body == null: return
+	var viewport_size := get_viewport().get_visible_rect().size
+	crisis_body.custom_minimum_size = Vector2(minf(500, viewport_size.x - 80), clampf(viewport_size.y - 330, 120, 280))
+	crisis_icon.custom_minimum_size.y = 64 if viewport_size.y < 600 else 96
+	crisis_title.add_theme_font_size_override("font_size", _snap_px(32 if viewport_size.y < 600 else 44))
+
+
+# ==================== 危机预警回顾（P1）====================
+## 右下角的预警回顾按钮，位于手牌排序按钮上方。
+func _build_warn_history(canvas: CanvasLayer) -> void:
+	warn_bar = _make_button("", _open_warn_history, 13)
+	warn_bar.custom_minimum_size = Vector2(166, 28)
+	warn_bar.tooltip_text = "点击重看本局全部危机预警"
+	warn_bar.visible = false
+	bottom_right.add_child(warn_bar)
+	bottom_right.move_child(warn_bar, hand_sort_btn.get_index())
+
+	var layer := CanvasLayer.new()
+	layer.name = "WarnLayer"
+	layer.layer = 6   # 危机弹窗(5) 之上、主菜单(10) 之下
+	add_child(layer)
+
+	warn_panel_root = Control.new()
+	warn_panel_root.set_anchors_preset(Control.PRESET_FULL_RECT)
+	warn_panel_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	warn_panel_root.visible = false
+	layer.add_child(warn_panel_root)
+
+	var warn_dim := ColorRect.new()   # 不叫 dim：类里已有一个 dim，重名会多一条 SHADOWED_VARIABLE 警告
+	warn_dim.color = Color(0.04, 0.06, 0.08, 0.74)
+	warn_dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	warn_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	warn_panel_root.add_child(warn_dim)
+
+	var center := CenterContainer.new()
+	center.set_anchors_preset(Control.PRESET_FULL_RECT)
+	warn_panel_root.add_child(center)
+
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size = Vector2(600, 0)
+	_panel_style(panel, Color(0.16, 0.13, 0.10, 0.97))
+	center.add_child(panel)
+
+	var pv := VBoxContainer.new()
+	pv.add_theme_constant_override("separation", 10)
+	panel.add_child(pv)
+
+	var title := _make_label("本局危机预警回顾", 24, Color(1, 0.88, 0.55))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pv.add_child(title)
+
+	warn_count_label = _make_label("", 14, Color(0.85, 0.88, 0.92))
+	warn_count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	pv.add_child(warn_count_label)
+
+	# 列表必须能滚：本局最多可能攒下 8~10 条，弹窗本体不滚动会顶穿窗口
+	var scroll := ScrollContainer.new()
+	MotionScroll.attach(scroll)
+	scroll.custom_minimum_size = Vector2(560, 400)
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	pv.add_child(scroll)
+
+	warn_list_box = VBoxContainer.new()
+	warn_list_box.add_theme_constant_override("separation", 8)
+	warn_list_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(warn_list_box)
+
+	var close_btn := _make_button("关闭", _close_warn_history, 18)
+	close_btn.custom_minimum_size = Vector2(0, 46)
+	pv.add_child(close_btn)
+
+
+func _open_warn_history() -> void:
+	if warn_panel_root == null:
+		return
+	_build_warn_rows()
+	warn_panel_root.visible = true
+
+
+func _close_warn_history() -> void:
+	if warn_panel_root:
+		warn_panel_root.visible = false
+
+
+## 按钮显示记录数，最近一次预警放在悬停提示。
+func _refresh_warn_bar() -> void:
+	if warn_bar == null:
+		return
+	var rows: Array = GameState.warn_history
+	if rows.is_empty():
+		warn_bar.visible = false
+		return
+	var last: Dictionary = rows[rows.size() - 1]
+	warn_bar.text = "⚠️预警回顾 · %d 条" % rows.size()
+	warn_bar.tooltip_text = "最近预警：%s(第 %d 回合)· 共 %d 条\n点击查看本局完整记录" % [
+		_crisis_short_label(str(last["id"])), int(last["turn"]), rows.size()]
+	warn_bar.visible = true
+
+
+## 顶部预警条用的短名（比 METRIC_NAMES 更短，避免「沉水植被告急」这种读起来绕的串）
+const WARN_SHORT_METRIC := {"vegetation": "植被", "fish": "鱼类", "birds": "候鸟", "community": "社区信任"}
+
+
+## 危机的短标签，如「水位告急」「水质偏高」（由 cond 里的指标 + 方向推出来）
+func _crisis_short_label(id: String) -> String:
+	var c: Dictionary = GameState.crisis_by_id(id)
+	if c.is_empty():
+		return "危机"
+	if bool(c.get("seasonal_social", false)):
+		return str(c.get("name", "治理风险"))
+	var pc := _parse_cond(str(c.get("cond", "")))
+	var metric := str(pc.get("metric", ""))
+	var nm := str(WARN_SHORT_METRIC.get(metric, GameState.METRIC_NAMES.get(metric, metric)))
+	return nm + ("告急" if str(pc.get("op", "<")) in ["<", "<="] else "偏高")
+
+
+func _build_warn_rows() -> void:
+	for ch in warn_list_box.get_children():
+		ch.queue_free()
+	var rows: Array = GameState.warn_history
+	warn_count_label.text = "共 %d 条(最新的在最上面)" % rows.size()
+	if rows.is_empty():
+		warn_list_box.add_child(_make_label("本局还没有出现过预警。", 16, Color(0.85, 0.88, 0.92)))
+		return
+	for i in range(rows.size() - 1, -1, -1):
+		warn_list_box.add_child(_make_warn_row(rows[i]))
+
+
+## 一条预警：第几回合 / 预警原文 / 当时的数值 / 后来有没有爆发 / 当时该打什么标签
+func _make_warn_row(e: Dictionary) -> Control:
+	var id := str(e["id"])
+	var turn := int(e["turn"])
+	var hit := int(e.get("hit_turn", -1))
+	var c: Dictionary = e.get("crisis", GameState.crisis_by_id(id))
+	var cname: String = str(c.get("name", id))
+	var pc := _parse_cond(str(c.get("cond", "")))
+	var metric := str(pc.get("metric", ""))
+	var mname := str(GameState.METRIC_NAMES.get(metric, metric))
+
+	var panel := PanelContainer.new()
+	_panel_style(panel, Color(0.13, 0.11, 0.09, 0.94))
+	var body := RichTextLabel.new()
+	body.bbcode_enabled = true
+	body.fit_content = true
+	body.scroll_active = false
+	body.custom_minimum_size = Vector2(520, 0)
+	body.add_theme_font_size_override("normal_font_size", _snap_px(14))
+	body.add_theme_color_override("default_color", Color(0.94, 0.92, 0.88))
+
+	# lead=2 是深预警（科研点累计达标后开启，提前 2 回合告知），标出来，
+	# 否则回看时两条「预警」看着一样、分不清哪条更早
+	var lead := int(e.get("lead", 1))
+	var tag := "⚠ 危机预警" if lead <= 1 else "⏳ 深预警(提前 2 回合)"
+	var t := "[color=#ffb060]第 %d 回合 · %s：%s[/color]\n" % [turn, tag, cname]
+	t += "%s\n" % str(c.get("warn", ""))
+	# 不写「警戒线」：那是危机的触发阈值，和 HUD 上的「生态红线」（致死线）
+	# 完全不是一个数（水质 55 vs 15/25/35），词又像，写出来只会误导。
+	t += "当时：%s %d\n" % [mname, int(e.get("value", 0))]
+	if hit > 0:
+		t += "[color=#ff9090]→ 第 %d 回合已结算：[/color]\n%s\n" % [hit, "\n".join(_crisis_effect_lines(c))]
+		if bool(c.get("mitigation", false)):
+			t += "对策已减伤 %d%%；以上为实际损失。\n" % roundi(float(c.get("mitigation_ratio", 0.0)) * 100.0)
+	elif GameState.game_over:
+		t += "[color=#9aa0a6]→ 未爆发[/color]\n"
+	else:
+		t += "[color=#ffcf80]→ 待爆发：第 %d 回合[/color]\n" % int(e.get("expected_hit_turn", turn + lead))
+	# 沿用预警弹窗里的说法（「应对建议：优先打出「卡名」」），不暴露内部的标签名 ——
+	# 「补水调度」「病害防控」这类标签玩家在别处根本看不到，写在日志里会显得割裂。
+	var counters: Array = GameState.counter_ids_for(c)
+	if not counters.is_empty():
+		var names: Array = []
+		for cid in counters:
+			names.append(_card_name(cid))
+		var shown: Array = names.slice(0, 3)
+		var tail: String = "" if names.size() <= 3 else " 等 %d 张" % names.size()
+		t += "[color=#8fd0ff]应对建议：优先打出「%s」%s[/color]" % ["」「".join(shown), tail]
+	body.text = t
+	panel.add_child(body)
+	return panel
+
+
+# ==================== 牌库（牌堆）UI ====================
+## 生成主题像素牌背（湖水蓝 + 波浪横纹）
+func _make_card_back_texture() -> Texture2D:
+	return preload("res://assets/art/guardian-card-back.svg")
+
+
+## 牌堆：生态指标框下方，叠放三张牌背；悬停黄框+孔雀开屏，点击查看牌库
+func _build_deck_ui(canvas: CanvasLayer) -> void:
+	card_back_tex = _make_card_back_texture()
+
+	deck_root = Control.new()
+	deck_root.anchor_left = 1.0
+	deck_root.anchor_top = 0.5
+	deck_root.anchor_right = 1.0
+	deck_root.anchor_bottom = 0.5
+	deck_root.offset_left = -161
+	# Closed stack spans x=12..82; keep the same 12px margin on both sides.
+	deck_root.offset_right = -67
+	# Visible stack center (local y=43) bisects the gap from y=266 to H-190.
+	deck_root.offset_top = -5
+	deck_root.offset_bottom = 99
+	deck_root.mouse_filter = Control.MOUSE_FILTER_STOP
+	canvas.add_child(deck_root)
+
+	# 黄色外框（悬停时显示，自绘贴牌形状）
+	deck_border = Control.new()
+	deck_border.set_anchors_preset(Control.PRESET_FULL_RECT)
+	deck_border.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	deck_border.visible = false
+	deck_border.draw.connect(_on_deck_border_draw)
+	deck_root.add_child(deck_border)
+
+	# 叠放的三张牌背
+	var stack_positions := [Vector2(12, 4), Vector2(15, 2), Vector2(18, 0)]
+	for i in 3:
+		var back := TextureRect.new()
+		back.texture = card_back_tex
+		back.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+		back.stretch_mode = TextureRect.STRETCH_SCALE
+		back.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		back.custom_minimum_size = Vector2(64, 86)
+		back.size = Vector2(64, 86)
+		back.position = stack_positions[i]
+		back.pivot_offset = Vector2(32, 43)
+		back.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		deck_root.add_child(back)
+		deck_backs.append(back)
+
+	# 悬停 / 点击
+	deck_root.mouse_entered.connect(_on_deck_mouse_entered)
+	deck_root.mouse_exited.connect(_on_deck_mouse_exited)
+	deck_root.gui_input.connect(_on_deck_gui_input)
+	deck_root.tooltip_text = "查看全部行动卡"
+
+
+func _on_deck_mouse_entered() -> void:
+	_deck_hovered = true
+	_fan_deck(true)
+	# 展开动画结束后才显示黄框（途中不显示）
+	var tw := Motion.tween(self, "linear")
+	tw.tween_interval(0.22)
+	tw.tween_callback(func() -> void:
+		if _deck_hovered:
+			deck_border.visible = true
+			deck_border.queue_redraw())
+
+
+func _on_deck_mouse_exited() -> void:
+	_deck_hovered = false
+	deck_border.visible = false
+	_fan_deck(false)
+
+
+## 孔雀开屏：悬停时三张牌背扇形展开，移开后收回
+func _fan_deck(out: bool) -> void:
+	var fan_positions := [Vector2(-1, 8), Vector2(20, 0), Vector2(41, 8)]
+	var fan_rotations := [-0.26, 0.0, 0.26]
+	var stack_positions := [Vector2(12, 4), Vector2(15, 2), Vector2(18, 0)]
+	for i in deck_backs.size():
+		var back: TextureRect = deck_backs[i]
+		var pos: Vector2 = fan_positions[i] if out else stack_positions[i]
+		var rot: float = fan_rotations[i] if out else 0.0
+		# press-stack: each depth receives the same gesture with its own delay.
+		MotionSpring.to(back, "position", pos, 350.0, 24.0, float(i) * 0.025)
+		MotionSpring.to(back, "rotation", rot, 350.0, 24.0, float(i) * 0.025)
+
+
+## 自绘黄框：给每张牌背各画一条贴牌黄边（严格贴着每张牌的形状）
+func _on_deck_border_draw() -> void:
+	for back in deck_backs:
+		var corners := _card_corners(back)
+		var pts := corners.duplicate()
+		pts.append(corners[0])
+		deck_border.draw_polyline(pts, Color(1.0, 0.85, 0.3), 3.0, true)
+
+
+## 计算一张牌背（带旋转）的四个角点（deck_root 局部坐标）
+func _card_corners(back: TextureRect) -> PackedVector2Array:
+	var c := cos(back.rotation)
+	var s := sin(back.rotation)
+	var corners := PackedVector2Array()
+	var locals: Array[Vector2] = [Vector2.ZERO, Vector2(back.size.x, 0), Vector2(back.size.x, back.size.y), Vector2(0, back.size.y)]
+	for local in locals:
+		var rel: Vector2 = local - back.pivot_offset
+		var rotated := Vector2(rel.x * c - rel.y * s, rel.x * s + rel.y * c)
+		corners.append(back.position + back.pivot_offset + rotated)
+	return corners
+
+
+func _on_deck_gui_input(event: InputEvent) -> void:
+	if _score_animating:
+		return      # 算分动画期间不开牌库查看器（它的 CanvasLayer 会盖在动画层上）
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_open_deck_viewer()
+
+
+## 牌库查看器：全屏弹层，逐张发牌展示所有卡牌
+func _build_deck_viewer() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "DeckViewerLayer"
+	layer.layer = 8
+	add_child(layer)
+
+	deck_viewer = Control.new()
+	deck_viewer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	deck_viewer.mouse_filter = Control.MOUSE_FILTER_STOP
+	deck_viewer.visible = false
+	layer.add_child(deck_viewer)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.62)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	deck_viewer.add_child(dim)
+
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.offset_left = 70
+	box.offset_right = -70
+	box.offset_top = 40
+	box.offset_bottom = -40
+	box.add_theme_constant_override("separation", 12)
+	deck_viewer.add_child(box)
+
+	var title_bar := HBoxContainer.new()
+	title_bar.add_theme_constant_override("separation", 10)
+	box.add_child(title_bar)
+
+	var title := _make_label("全部卡牌", 28, Color(1, 0.9, 0.55))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_bar.add_child(title)
+
+	deck_sort_btn = _make_sort_button()
+	title_bar.add_child(deck_sort_btn)
+	_update_sort_btn()
+
+	var scroll := ScrollContainer.new()
+	deck_viewer_scroll = scroll
+	MotionScroll.attach(scroll)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(scroll)
+
+	# 四周留内边距：顶部留足放大+漂浮的余量，避免顶行/左列卡被裁剪
+	var margin := MarginContainer.new()
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_theme_constant_override("margin_top", 30)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	scroll.add_child(margin)
+
+	deck_viewer_grid = HFlowContainer.new()
+	deck_viewer_grid.add_theme_constant_override("h_separation", 14)
+	deck_viewer_grid.add_theme_constant_override("v_separation", 14)
+	deck_viewer_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_child(deck_viewer_grid)
+
+	var close := _make_button("关闭", _close_deck_viewer, 20)
+	close.custom_minimum_size = Vector2(0, 48)
+	box.add_child(close)
+
+	_build_card_detail()
+
+
+## 牌库打开时把 HUD 其余面板收出屏幕，关闭时弹回原位（保持尺寸，仅平移 offset）
+func _slide_main_ui(out: bool) -> void:
+	for tw in _ui_slide_tweens:
+		if tw != null and tw.is_valid():
+			tw.kill()
+	_ui_slide_tweens.clear()
+	var vp := get_viewport().get_visible_rect().size
+	var ctrls: Array = [left_panel, right_panel, staged_board, event_label, hand_panel, bottom_right, deck_root, tier_lever]
+	for c in ctrls:
+		if c == null:
+			continue
+		if not _ui_slide_origin.has(c):
+			_ui_slide_origin[c] = [c.offset_left, c.offset_top, c.offset_right, c.offset_bottom]
+		var origin: Array = _ui_slide_origin[c]
+		var dir := _slide_out_dir(c)
+		var dx := dir.x * (vp.x + 200.0)
+		var dy := dir.y * (vp.y + 200.0)
+		var target_left: float = float(origin[0]) + (dx if out else 0.0)
+		var target_right: float = float(origin[2]) + (dx if out else 0.0)
+		var target_top: float = float(origin[1]) + (dy if out else 0.0)
+		var target_bottom: float = float(origin[3]) + (dy if out else 0.0)
+		var tw := Motion.tween(self, "linear")
+		Motion.curve(tw, "power2.inOut")
+		tw.tween_property(c, "offset_left", target_left, 0.34)
+		tw.parallel().tween_property(c, "offset_right", target_right, 0.34)
+		tw.parallel().tween_property(c, "offset_top", target_top, 0.34)
+		tw.parallel().tween_property(c, "offset_bottom", target_bottom, 0.34)
+		_ui_slide_tweens.append(tw)
+
+
+## 每个面板收起的方向（向最近的屏幕外平移）
+func _slide_out_dir(c: Control) -> Vector2:
+	if c == left_panel:
+		return Vector2(-1, 0)   # 左面板向左出
+	if c == right_panel or c == deck_root:
+		return Vector2(1, 0)    # 右面板 / 牌堆向右出
+	if c == event_label or c == staged_board:
+		return Vector2(0, -1)   # 顶部横幅向上出
+	if c == bottom_right:
+		return Vector2(1, 0)    # 结束回合按钮向右出
+	return Vector2(0, 1)       # 手牌向下出
+
+
+func _open_deck_viewer() -> void:
+	if _deck_open:
+		return
+	_deck_open = true
+	deck_viewer.visible = true
+	MotionScroll.reset_to_top(deck_viewer_scroll)
+	# 收起牌堆的悬停状态（避免残留黄框/孔雀开屏），并把其余 HUD 收出屏幕
+	_deck_hovered = false
+	deck_border.visible = false
+	_fan_deck(false)
+	_slide_main_ui(true)
+	_update_sort_btn()   # 重开时同步按钮文字与当前排序方式，严格绑定
+	# 重建全部卡牌
+	for c in deck_viewer_grid.get_children():
+		deck_viewer_grid.remove_child(c)
+		c.queue_free()
+	_deck_gyro_view = null
+	var cards: Array = []
+	for card in _sorted_action_cards(_deck_sort_by_category):
+		var made := _make_card(card, "effective")
+		var panel: PanelContainer = made["panel"]
+		var view := _make_gyro_card_view(panel)
+		view.set_meta("card", card)
+		view.tooltip_text = "%s\n\n%s" % [card["desc"], _effect_text(card)]
+		view.scale = Vector2(0.3, 0.3)
+		view.modulate.a = 0.0
+		view.mouse_entered.connect(_on_viewer_card_hover.bind(view, card))
+		view.mouse_exited.connect(_on_viewer_card_unhover.bind(view))
+		view.gui_input.connect(_on_viewer_card_click.bind(view, card))
+		deck_viewer_grid.add_child(view)
+		cards.append(view)
+	# 等一帧布局完成后逐张发牌
+	await get_tree().process_frame
+	MotionScroll.reset_to_top(deck_viewer_scroll)
+	for i in cards.size():
+		var p: Control = cards[i]
+		var tw := Motion.tween(p, "enter", "arrival")
+		tw.tween_property(p, "scale", Vector2.ONE, 0.28).set_delay(Motion.stagger("enter", i))
+		tw.parallel().tween_property(p, "modulate:a", 1.0, 0.18).set_delay(Motion.stagger("enter", i))
+
+
+## 整张卡作为刚性平面旋转，纹理使用透视正确采样，避免三角形接缝与扭曲。
+## 卡面、框线和闪箔共享同一中心与投影；鼠标角度和缓动保持原有手感。
+func _make_gyro_material() -> ShaderMaterial:
+	var mat := ShaderMaterial.new()
+	mat.shader = preload("res://scripts/card_rigid.gdshader")
+	return mat
+
+
+func _use_parent_material_tree(node: Node, overlays: Array) -> void:
+	for child in node.get_children():
+		if child.get_meta("card_projected_shadow", false):
+			continue
+		if child is CanvasItem:
+			if child.get_meta("card_gyro_overlay", false):
+				child.use_parent_material = false
+				overlays.append(child.material)
+			else:
+				child.use_parent_material = true
+		_use_parent_material_tree(child, overlays)
+
+
+func _bind_card_gyro(card: Control) -> void:
+	card.material = _make_gyro_material()
+	var overlays: Array = []
+	_use_parent_material_tree(card, overlays)
+	card.set_meta("gyro_overlays", overlays)
+	if not card.has_meta("projected_shadow"):
+		var shadow := Node2D.new()
+		shadow.set_script(preload("res://scripts/card_projected_shadow.gd"))
+		shadow.name = "ProjectedCardShadow"
+		shadow.set_meta("card_projected_shadow", true)
+		shadow.show_behind_parent = true
+		shadow.use_parent_material = false
+		card.add_child(shadow)
+		card.set_meta("projected_shadow", shadow)
+	_step_card_gyro(card, Vector2.ZERO, 0.0)
+
+
+func _make_gyro_card_view(panel: PanelContainer) -> Control:
+	var view := Control.new()
+	view.set_script(preload("res://scripts/card_hit_view.gd"))
+	view.size = Vector2(122, 165)
+	view.custom_minimum_size = view.size
+	view.mouse_filter = Control.MOUSE_FILTER_STOP
+	panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	view.add_child(panel)
+	view.set_meta("panel", panel)
+	_bind_card_gyro(view)
+	return view
+
+
+func _card_gyro_center(card: Control) -> Vector2:
+	return card.get_global_transform() * (card.size * 0.5)
+
+
+func _card_gyro_target(card: Control, mouse: Vector2, active: bool, relative_to_face: bool = false) -> Vector2:
+	if not active:
+		return Vector2.ZERO
+	if relative_to_face:
+		# Hand and staged cards share pressure by position on the face, independent
+		# of fan rotation or hover scale. Edges apply the same bounded tilt in both rows.
+		var local := card.get_global_transform().affine_inverse() * mouse - card.size * 0.5
+		var pressure := local / Vector2(maxf(1.0, card.size.x * 0.5), maxf(1.0, card.size.y * 0.5))
+		return Vector2(clampf(pressure.y * 0.32, -0.32, 0.32), clampf(pressure.x * 0.32, -0.32, 0.32))
+	var offset := mouse - _card_gyro_center(card)
+	return Vector2(clampf(offset.y * 0.0032, -0.32, 0.32), clampf(offset.x * 0.0042, -0.32, 0.32))
+
+
+func _step_card_gyro(card: Control, target: Vector2, delta: float) -> void:
+	var mat := card.material as ShaderMaterial
+	if mat == null:
+		return
+	var current := Vector2(float(card.get_meta("gyro_x", 0.0)), float(card.get_meta("gyro_y", 0.0)))
+	var face: TextureRect = preload("res://scripts/card_geometry.gd").face_of(card)
+	var geometry_key: Array = [mat.get_instance_id(), card.get_global_transform(), card.size,
+		face.position if face else Vector2.ZERO, face.size if face else Vector2.ZERO,
+		face.texture.get_instance_id() if face and face.texture else 0]
+	var old_poke: float = float(card.get_meta("poke_age", 1.0))
+	if old_poke >= 0.28 and current == target and card.get_meta("gyro_geometry_key", []) == geometry_key:
+		return
+	card.set_meta("gyro_geometry_key", geometry_key)
+	current = current.lerp(target, 1.0 - exp(-12.0 * delta))
+	if current.distance_squared_to(target) < 0.0000000001: current = target
+	var poke_age: float = minf(1.0, float(card.get_meta("poke_age", 1.0)) + delta)
+	card.set_meta("poke_age", poke_age)
+	var poke_scale := 1.0
+	if poke_age < 0.28 and wetland and not wetland.reduced_motion:
+		var decay := 1.0 - poke_age / 0.28
+		current += Vector2(sin(poke_age * 105.0), sin(poke_age * 83.0)) * 0.035 * decay
+		poke_scale = 1.0 - sin(poke_age / 0.28 * PI) * 0.07
+	card.set_meta("poke_scale", poke_scale)
+	card.set_meta("gyro_x", current.x)
+	card.set_meta("gyro_y", current.y)
+	mat.set_shader_parameter("tilt_x", current.x)
+	mat.set_shader_parameter("tilt_y", current.y)
+	mat.set_shader_parameter("card_center", _card_gyro_center(card))
+	mat.set_shader_parameter("poke_scale", poke_scale)
+	if face != null:
+		var face_rect: Rect2 = preload("res://scripts/card_geometry.gd").face_rect(face)
+		for child in face.get_parent().get_children():
+			if child is Control and child.get_meta("card_gyro_overlay", false):
+				child.position = face.position + face_rect.position
+				child.size = face_rect.size
+	if card.has_meta("projected_shadow"):
+		card.get_meta("projected_shadow").update_projection(card, current)
+	# 独立的闪箔膜保留片元材质，同时与卡面共用倾斜和透视中心。
+	for overlay: ShaderMaterial in card.get_meta("gyro_overlays", []):
+		overlay.set_shader_parameter("tilt_x", current.x)
+		overlay.set_shader_parameter("tilt_y", current.y)
+		overlay.set_shader_parameter("card_center", _card_gyro_center(card))
+		overlay.set_shader_parameter("poke_scale", poke_scale)
+
+func _poke_card(card: Control) -> void:
+	if card == null or not is_instance_valid(card): return
+	card.set_meta("poke_age", 0.0)
+	card.set_meta("poke_count", int(card.get_meta("poke_count", 0)) + 1)
+
+
+func _close_deck_viewer() -> void:
+	_close_card_detail()
+	_deck_open = false
+	_deck_gyro_view = null
+	deck_viewer.visible = false
+	_slide_main_ui(false)
+
+
+# ==================== 牌库排序（按类别 / 按费用 切换） ====================
+## 互旋箭头图标（两个方向相反的箭头，表示切换）
+func _make_swap_icon_texture(px: int) -> ImageTexture:
+	var grid := """............X...
+............XX..
+XXXXXXXXXXXXXXX.
+XXXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXX.
+............XX..
+............X...
+................
+................
+...X............
+..XX............
+.XXXXXXXXXXXXXXX
+XXXXXXXXXXXXXXXX
+.XXXXXXXXXXXXXXX
+..XX............
+...X............"""
+	var img := _grid_image(grid, Color(1.0, 0.92, 0.66), Color(0.85, 0.72, 0.42), Color(1.0, 1.0, 1.0))
+	img.resize(px, px, Image.INTERPOLATE_NEAREST)
+	return ImageTexture.create_from_image(img)
+
+
+## 排序切换按钮：互旋箭头 + 文字，点击切换排序方式
+func _make_sort_button() -> Button:
+	var b := _make_button("", _toggle_deck_sort, 16)
+	b.icon = _make_swap_icon_texture(32)
+	b.custom_minimum_size = Vector2(150, 42)
+	return b
+
+
+## 刷新排序按钮文字与提示
+## 同步两处排序按钮（牌库面板里 + 出牌阶段右下角）。
+## 它们共用同一个 _deck_sort_by_category，所以文案永远一致。
+## ⚠ 不要因为某一个为 null 就整体 return —— 两个按钮不是同时创建的。
+func _update_sort_btn() -> void:
+	var mode := "按类别排序" if _deck_sort_by_category else "按费用排序"
+	var tip := "切换排序方式(当前：%s)" % mode
+	if deck_sort_btn != null:
+		deck_sort_btn.text = mode
+		deck_sort_btn.tooltip_text = tip
+	if hand_sort_btn != null:
+		hand_sort_btn.text = mode
+		hand_sort_btn.tooltip_text = tip
+
+
+## 排序冷却：锁死期间按钮禁用并显示倒计时，禁止交互/无按下反馈
+func _allocation_controls_locked() -> bool:
+	return _score_animating or _current_phase != "allocate" or GameState.game_over
+
+func _refresh_allocation_controls() -> void:
+	_update_sort_cooldown()
+	_update_lever_cooldown()
+	_refresh_action_buttons()
+
+func _update_sort_cooldown() -> void:
+	var remaining := SORT_COOLDOWN_MS - (Time.get_ticks_msec() - _sort_cooldown_ms)
+	if _score_animating:
+		if deck_sort_btn: deck_sort_btn.disabled = true
+	else:
+		_apply_sort_cooldown(deck_sort_btn, remaining)
+	if hand_sort_btn and (_allocation_controls_locked() or (sandpan_view and sandpan_view.collapsed)):
+		hand_sort_btn.disabled = true
+		hand_sort_btn.text = "按类别排序" if _deck_sort_by_category else "按费用排序"
+	else:
+		_apply_sort_cooldown(hand_sort_btn, remaining)
+
+
+## 冷却期间按钮禁用并显示倒计时。冷却也是两边共用的。
+## 抽成独立函数是为了避免每帧构造数组/闭包 —— 它每帧都被 _process 调到。
+func _apply_sort_cooldown(btn: Button, remaining: int) -> void:
+	if btn == null:
+		return
+	if remaining > 0:
+		if not btn.disabled:
+			btn.disabled = true
+		btn.text = "冷却中 %d 秒" % int(ceil(remaining / 1000.0))
+	elif btn.disabled:
+		btn.disabled = false
+		_update_sort_btn()
+
+
+func _toggle_deck_sort() -> void:
+	if _score_animating: return
+	# 锁死两次切换之间的最低时间间隔（见 SORT_COOLDOWN_MS），杜绝连点造成排列错乱
+	var now := Time.get_ticks_msec()
+	if now - _sort_cooldown_ms < SORT_COOLDOWN_MS:
+		return
+	if _sort_animating:
+		return
+	_sort_cooldown_ms = now
+	_sort_animating = true
+	_deck_sort_by_category = not _deck_sort_by_category
+	_update_sort_btn()
+	await _sort_deck_cards(_deck_sort_by_category)
+	_sort_animating = false
+
+
+## 按当前排序规则返回 ACTION_CARDS 的有序副本
+func _sorted_action_cards(by_category: bool) -> Array:
+	var cards: Array = GameState.ACTION_CARDS.duplicate()
+	cards.sort_custom(func(a, b): return _card_dict_less(a, b, by_category))
+	return cards
+
+
+## 两张卡牌的比较器：类别排序按类别序（生态→社会→管理），费用排序按费用升序
+func _card_dict_less(a: Dictionary, b: Dictionary, by_category: bool) -> bool:
+	if by_category:
+		var oa := CATEGORY_ORDER.find(a["category"])
+		var ob := CATEGORY_ORDER.find(b["category"])
+		if oa != ob:
+			return oa < ob
+	else:
+		if a["cost"] != b["cost"]:
+			return a["cost"] < b["cost"]
+		var oa := CATEGORY_ORDER.find(a["category"])
+		var ob := CATEGORY_ORDER.find(b["category"])
+		if oa != ob:
+			return oa < ob
+	# 同级再按费用、id 稳定排序
+	if a["cost"] != b["cost"]:
+		return a["cost"] < b["cost"]
+	return a["id"] < b["id"]
+
+
+## 重排牌库卡牌并让它们直接飞到新位置
+func _sort_deck_cards(by_category: bool) -> void:
+	var panels: Array = deck_viewer_grid.get_children()
+	if panels.size() < 2:
+		return
+	# 先停掉所有悬停动画并复位，避免和飞行动画打架
+	for p in panels:
+		_kill_card_tweens(p)
+		p.z_index = 0
+		p.rotation = 0.0
+		p.scale = Vector2.ONE
+		p.modulate.a = 1.0
+		_remove_yellow_frame(p)
+	# 记录旧位置
+	var old_pos := {}
+	for p in panels:
+		old_pos[p] = p.position
+	# 按新规则排序并重排子节点
+	panels.sort_custom(func(a, b): return _card_dict_less(a.get_meta("card"), b.get_meta("card"), by_category))
+	for i in panels.size():
+		deck_viewer_grid.move_child(panels[i], i)
+	# 等两帧确保 HFlowContainer 完成重新布局（一帧可能不够，读到旧位置会导致排序没变）
+	deck_viewer_grid.queue_sort()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	# 把每张牌拉回旧位置，再 tween 直接飞到新位置
+	for p in panels:
+		var new_pos: Vector2 = p.position
+		p.position = old_pos[p]
+		p.set_meta("base_pos", new_pos)   # 更新悬停基准位，避免下次悬停飞到旧位
+		var tw: Tween = Motion.tween(p, "linear")
+		Motion.curve(tw, "power2.inOut")
+		tw.tween_property(p, "position", new_pos, 0.3)
+	# 等飞行动画完成，期间 _sort_animating 保持 true，避免连点造成位置 tween 重叠
+	await get_tree().create_timer(0.32).timeout
+
+
+## 出牌阶段的排序：与牌库共用一个模式、一套冷却，只是作用对象换成在场手牌。
+func _toggle_hand_sort() -> void:
+	if _allocation_controls_locked(): return
+	if sandpan_view and sandpan_view.collapsed: return
+	for info in card_infos:
+		if info.get("dealing", false): return
+	var now := Time.get_ticks_msec()
+	if now - _sort_cooldown_ms < SORT_COOLDOWN_MS:
+		return
+	if _sort_animating or card_infos.size() < 2:
+		return
+	_sort_cooldown_ms = now
+	_sort_animating = true
+	_deck_sort_by_category = not _deck_sort_by_category
+	_update_sort_btn()
+	await _sort_hand_cards(_deck_sort_by_category)
+	_sort_animating = false
+
+
+## 给在场手牌重排。
+##
+## 扇形的位置全部由 _layout_fan() 统一算（base_pos / theta / radial 写回 card_infos），
+## 所以流程是：先排好 card_infos → 重新布局 → 把每张牌拉回它**原来那个位置** →
+## 再 tween 飞到新位置。这样看到的是「牌互相换位」，而不是全体瞬移重排。
+##
+## ⚠ 旧位置必须按 panel 存，不能按下标 —— 排完序下标就换人了。
+## ⚠ 选中状态挂在 card_infos 的条目上，跟着卡片一起走，不需要额外保存/恢复；
+##   金色选中框是画在 panel 上的，也随 panel 一起移动。
+func _sort_hand_cards(by_category: bool) -> void:
+	var GATHER_DUR := Motion.seconds("gather")        # 收牌时长
+	var GATHER_LAG := float(Motion.profiles.gather.stagger)       # 收牌错开（做出"被一把收拢"的层次）
+	var DEAL_DUR := Motion.seconds("deal")          # 发牌时长
+	var DEAL_LAG := float(Motion.profiles.deal.stagger)         # 发牌错开（沿用 _play_deal_animation 的节奏）
+	const PILE_SPREAD := 1.0
+	var pile_scale := Vector2(64.0 / 122.0, 86.0 / 165.0)
+
+	var hand_infos: Array = []
+	var staged_infos: Array = []
+	for info in card_infos:
+		if info.get("staged_by_drag", false):
+			staged_infos.append(info)
+		else:
+			hand_infos.append(info)
+	if hand_infos.size() < 2:
+		return
+	var n := hand_infos.size()
+
+	# ① Shrink into the visible deck back on the right, using its actual screen
+	# center and size. Account for each hand card's bottom pivot at the small scale.
+	var deck_rect := deck_root.get_global_rect()
+	var pile_screen := deck_rect.position + Vector2(50.0, 43.0)
+	if not deck_backs.is_empty():
+		var back: Control = deck_backs.back()
+		pile_screen = back.get_global_transform() * (back.size * 0.5)
+		pile_scale = back.size / Vector2(122.0, 165.0)
+	var pile_center := _screen_to_card_box(pile_screen)
+	# 收牌落点按 **panel** 存 —— _layout_fan() 会重排位置，排完序下标就换人了
+	var pile_pos: Dictionary = {}
+	for i in n:
+		var info: Dictionary = hand_infos[i]
+		var p: PanelContainer = info["panel"]
+		if not is_instance_valid(p):
+			return
+		# 让 _update_card_hover 让出控制权：它每帧把牌拽回 base_pos，
+		# 会和飞行 tween 逐帧打架（照抄 shaking / 算分飞牌的既有做法）
+		info["flying"] = true
+		info["hovered"] = false
+		_kill_card_tweens(p)
+		p.z_index = 1000 + i
+		var spot: Vector2 = pile_center - p.pivot_offset + (p.pivot_offset - p.size * 0.5) * pile_scale \
+			+ Vector2(-float(i) * PILE_SPREAD, 0.0)
+		pile_pos[p] = spot
+		var d: float = float(i) * GATHER_LAG
+		var tw := Motion.tween(p, "linear")
+		tw.set_parallel(true)
+		Motion.curve(tw, "power2.in")
+		tw.tween_property(p, "position", spot, GATHER_DUR).set_delay(d)
+		tw.tween_property(p, "rotation", 0.0, GATHER_DUR).set_delay(d)
+		tw.tween_property(p, "scale", pile_scale, GATHER_DUR).set_delay(d)
+	await get_tree().create_timer(GATHER_DUR + float(n - 1) * GATHER_LAG + 0.08).timeout
+
+	# ② 排序 + 重新布局。此刻牌全叠在一点，位置怎么变都看不出来，
+	#    排序这一步天然被收拢动作掩盖掉了 —— 顺序要到发牌时才揭晓。
+	hand_infos.sort_custom(func(a, b):
+		return _card_id_dict_less(str(a["card_id"]), str(b["card_id"]), by_category))
+	card_infos.clear()
+	card_infos.append_array(hand_infos)
+	card_infos.append_array(staged_infos)
+	_layout_fan()   # 重写每张牌的 position / rotation / base_pos / theta / radial
+
+	# ③ 发牌：从牌堆位置按新顺序逐张飞回自己的扇形位置
+	_play_deal_sfx(n, DEAL_DUR + float(DEAL_SFX_FULL_HAND - 1) * DEAL_LAG)
+	for i in n:
+		var info: Dictionary = hand_infos[i]
+		var p: PanelContainer = info["panel"]
+		if not is_instance_valid(p):
+			continue
+		# The fan now has a new left-to-right order. Old gather ranks would put
+		# some left cards above their right neighbours until the last deal lands.
+		p.z_index = 1000 + i
+		var target: Vector2 = info["base_pos"]
+		# 已选中的牌最终是「抬起来」的：直接发到抬起后的落点，
+		# 别先落平再由 _update_card_hover 抬一次（那样会多一次起落）
+		if bool(info["selected"]):
+			target += (info["radial"] as Vector2) * CARD_RAISE
+		p.position = pile_pos.get(p, target)
+		p.rotation = 0.0
+		p.scale = pile_scale
+		var d: float = float(i) * DEAL_LAG
+		var tw := Motion.tween(p, "linear")
+		tw.set_parallel(true)
+		Motion.curve(tw, str(Motion.profiles.deal.ease))
+		tw.tween_property(p, "position", target, DEAL_DUR).set_delay(d)
+		tw.tween_property(p, "rotation", float(info["theta"]), DEAL_DUR).set_delay(d)
+		tw.tween_property(p, "scale", Vector2.ONE, DEAL_DUR).set_delay(d)
+
+	# 等发完，期间 _sort_animating 保持 true，避免连点让位置 tween 重叠
+	await get_tree().create_timer(DEAL_DUR + float(n - 1) * DEAL_LAG + 0.02).timeout
+	for info in hand_infos:
+		info["flying"] = false
+		var p: PanelContainer = info["panel"]
+		if is_instance_valid(p):
+			p.z_index = 0
+	# Restore sibling order in this same frame, before hover resumes.
+	_update_card_stack()
+
+
+## 按 card_id 比较（手牌排序用 —— card_infos 里存的是 id，不是卡牌字典）
+func _card_id_dict_less(a_id: String, b_id: String, by_category: bool) -> bool:
+	var a := _find_card_data(a_id)
+	var b := _find_card_data(b_id)
+	if a.is_empty() or b.is_empty():
+		return a_id < b_id
+	return _card_dict_less(a, b, by_category)
+
+
+# ==================== 牌库卡牌悬停 / 点击查看 ====================
+## 悬停：浮起放大 + 黄框；并记录为陀螺仪目标，不添加循环漂浮。
+func _on_viewer_card_hover(view: Control, _card: Dictionary) -> void:
+	_deck_gyro_view = view
+	_kill_card_tweens(view, true)
+	if not view.has_meta("base_pos"):
+		view.set_meta("base_pos", view.position)  # 首次悬停才记录原位（此时布局已完成）
+	var base: Vector2 = view.get_meta("base_pos")
+	view.z_index = 10
+	view.pivot_offset = view.size * 0.5
+	# Motion-web spring-default: lift with weight, preserve momentum on reversal.
+	MotionSpring.to(view, "position", base + Vector2(0, -16), 350.0, 28.0)
+	MotionSpring.to(view, "scale", Vector2(1.12, 1.12), 350.0, 28.0)
+	_apply_yellow_frame(view)
+
+
+func _on_viewer_card_unhover(view: Control) -> void:
+	if _deck_gyro_view == view:
+		_deck_gyro_view = null
+	_kill_card_tweens(view, true)
+	view.z_index = 0
+	var base: Vector2 = view.get_meta("base_pos", view.position)
+	MotionSpring.to(view, "position", base, 350.0, 28.0)
+	MotionSpring.to(view, "scale", Vector2.ONE, 350.0, 28.0)
+	MotionSpring.to(view, "rotation", 0.0, 350.0, 28.0)
+	_remove_yellow_frame(view)
+
+
+## 取消该卡牌所有悬停/归位动画，避免快速反复划过时 tween 打架
+func _kill_card_tweens(view: Control, preserve_momentum: bool = false) -> void:
+	if not preserve_momentum:
+		for key in ["position", "scale", "rotation"]: MotionSpring.stop(view, key)
+	var tweens: Array = view.get_meta("hover_tweens", [])
+	for t in tweens:
+		if t != null:
+			t.kill()
+	view.set_meta("hover_tweens", null)
+	if view.has_meta("return_tween"):
+		var ret: Tween = view.get_meta("return_tween")
+		if ret != null:
+			ret.kill()
+	view.set_meta("return_tween", null)
+
+
+## 牌库陀螺仪：只对鼠标悬停的那张牌做 3D 透视倾斜（绕 X/Y 轴），其余回正
+func _process_deck_gyro(delta: float, mouse_override: Vector2 = Vector2.INF) -> void:
+	# 三个网格（牌库 / 紧急调度 / 知识卡图鉴）任一开着就继续跑
+	var dispatch_open: bool = dispatch_panel != null and dispatch_panel.visible
+	var knowledge_open: bool = knowledge_viewer != null and knowledge_viewer.visible
+	if not _deck_open and not dispatch_open and not knowledge_open:
+		return
+	if deck_viewer_grid == null and dispatch_grid == null and knowledge_grid == null:
+		return
+	var mouse := mouse_override if mouse_override != Vector2.INF else get_viewport().get_mouse_position()
+	# 牌库与紧急调度面板用的是同一套卡牌网格与同一个 _deck_gyro_view，
+	# 所以这里按「当前开着哪个网格」选目标，两处都能有透视倾斜。
+	var grid: HFlowContainer = deck_viewer_grid
+	if knowledge_open:
+		grid = knowledge_grid      # 图鉴的优先级最高：它盖在开始页上，不会与另两个同时开
+	elif not _deck_open and dispatch_panel != null and dispatch_panel.visible:
+		grid = dispatch_grid
+	if grid == null:
+		return
+	for view in grid.get_children():
+		if not is_instance_valid(view):
+			continue
+		_step_card_gyro(view, _card_gyro_target(view, mouse, view == _deck_gyro_view), delta)
+
+
+## 详情大牌的陀螺仪：鼠标压在**这张放大牌**上时，整张牌跟着做同样的 3D 倾斜 ——
+## 与网格里悬停一张牌是同一种手感，只是牌已经放大展示在左边了。
+##
+## 大牌是静态展示（mouse_filter = IGNORE，事件不会到它），所以这里每帧自己算命中。
+## 命中用逆变换，兼容缩放后的详情卡。
+## mouse_override 同 _update_card_hover，仅供自动化测试顶替真实鼠标。
+func _process_detail_gyro(delta: float, mouse_override: Vector2 = Vector2.INF) -> void:
+	var targets: Array = []
+	if card_detail != null and card_detail.visible and _detail_big_card != null and is_instance_valid(_detail_big_card):
+		targets.append(_detail_big_card)
+	if knowledge_detail != null and knowledge_detail.visible and _knowledge_big_card != null and is_instance_valid(_knowledge_big_card):
+		targets.append(_knowledge_big_card)
+	if targets.is_empty():
+		return
+	var mouse := mouse_override if mouse_override != Vector2.INF else get_viewport().get_mouse_position()
+	for big in targets:
+		var active := preload("res://scripts/card_geometry.gd").contains(big, mouse)
+		_step_card_gyro(big, _card_gyro_target(big, mouse, active), delta)
+
+
+func _on_viewer_card_click(event: InputEvent, view: Control, card: Dictionary) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_poke_card(view)
+		_show_card_detail(view, card)
+
+
+## 悬停黄框。⚠ 必须用「这张牌**自己的**」悬停样式，不能一律 card_style(true)：
+## 知识卡图鉴里未收集的卡是灰纸底，套用行动卡那套样式会让它一被划过就"亮"起来
+## （真窗口回归实测抓到：灰卡只要悬停过一次，底色就永久变成纸卡）。
+func _apply_yellow_frame(view: Control) -> void:
+	var panel: PanelContainer = view.get_meta("panel")
+	if view.has_meta("hover_style"):
+		panel.add_theme_stylebox_override("panel", view.get_meta("hover_style"))
+	else:
+		panel.add_theme_stylebox_override("panel", VisualTheme.card_style(true))
+
+
+## 还原成**这张牌自己的**基础底色（同理，不能硬编码 card_style()）
+func _remove_yellow_frame(view: Control) -> void:
+	var panel: PanelContainer = view.get_meta("panel")
+	if view.has_meta("base_style"):
+		panel.add_theme_stylebox_override("panel", view.get_meta("base_style"))
+	else:
+		panel.add_theme_stylebox_override("panel", VisualTheme.card_style())
+
+
+## 卡牌详情：左大牌 + 右介绍框（打字机）；大牌从被点击处平移放大投射到左侧展示位
+func _show_card_detail(view: Control, card: Dictionary) -> void:
+	card_detail.visible = true
+	card_detail.set_meta("closing", false)
+	if _detail_big_card != null and is_instance_valid(_detail_big_card):
+		Motion.release_face(_detail_big_card)
+		_detail_big_card.queue_free()
+		_detail_big_card = null
+	var made_big := _make_card(card)
+	var big: PanelContainer = made_big["panel"]
+	big.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	big.pivot_offset = Vector2(61, 82.5)
+	big.set_meta("shadow_preserve_size", true)
+	_bind_card_gyro(big)
+	big.set_meta("gyro_x", 0.0)
+	big.set_meta("gyro_y", 0.0)
+	_detail_big_card = big
+	big.set_meta("source_view", view)
+	_poke_card(big)
+	# 起始：被点击卡牌的屏幕中心；终点：左侧展示区中心
+	var src_center := _card_gyro_center(view)
+	var dst_center := card_detail_card.get_global_rect().get_center()
+	var inv := card_detail.get_global_transform().affine_inverse()
+	var src_local: Vector2 = inv * src_center - big.pivot_offset
+	var dst_local: Vector2 = inv * dst_center - big.pivot_offset
+	big.position = src_local
+	big.scale = Vector2.ONE
+	card_detail.add_child(big)
+	Motion.borrow_face(big, view)
+	_step_card_gyro(big, Vector2.ZERO, 0.0)
+	# 投射动画：平移 + 放大
+	if wetland and wetland.reduced_motion:
+		big.position = dst_local
+		big.scale = Vector2(1.8, 1.8)
+		big.rotation = 0.0
+	else:
+		var fly := Motion.tween(big, "carry", "detail")
+		big.set_meta("fly_tween", fly)
+		fly.tween_property(big, "position", dst_local, Motion.seconds("carry"))
+		fly.parallel().tween_property(big, "scale", Vector2(1.8, 1.8), Motion.seconds("carry"))
+		fly.parallel().tween_property(big, "rotation", 0.0, Motion.seconds("carry"))
+	card_detail_title.text = card["name"]
+	card_detail_body.text = _card_detail_text(card)
+	Motion.cancel(card_detail_body, "text_reveal")
+	if wetland and wetland.reduced_motion:
+		card_detail_body.visible_characters = -1
+		return
+	card_detail_body.visible_characters = 0
+	var total := card_detail_body.get_total_character_count()
+	var tw := Motion.tween(card_detail_body, "linear", "text_reveal")
+	Motion.curve(tw, "none")
+	tw.tween_property(card_detail_body, "visible_characters", total, clampf(total * 0.03, 0.4, 2.5))
+
+
+func _card_detail_text(card: Dictionary) -> String:
+	var body := "[color=#8a8a8a]类别：%s　成本：%d 万[/color]\n\n" % [CATEGORY_NAMES[card["category"]], card["cost"]]
+	body += "%s\n\n" % card["desc"]
+	body += "[b]档位效果[/b]\n"
+	for tier in ["basic", "effective", "deep"]:
+		var t: Dictionary = card["tiers"][tier]
+		var parts: Array = []
+		for e in t["effects"]:
+			var d: int = e["delay"]
+			var suffix := "(%d 回合后)" % d if d > 0 else ""
+			parts.append("%s %+d%s" % [GameState.METRIC_NAMES[e["metric"]], int(e["delta"]), suffix])
+		# 顺带把每一档的价格印出来（图鉴是策划比价的地方，价格与效果要挨着看）
+		body += "· %s(%d 万)：%s%s\n" % [GameState.TIER_NAMES[tier],
+			GameState.tier_cost(str(card["id"]), tier), "、".join(parts),
+			"　← 当前档位" if tier == play_tier else ""]
+	if card.has("side_note") and not card["side_note"].is_empty():
+		for k in card["side_note"]:
+			if not str(card["side_note"][k]).is_empty():
+				body += "\n[color=#ffb060]※ %s[/color]" % card["side_note"][k]
+	return body
+
+
+func _close_card_detail() -> void:
+	Motion.release_face(_detail_big_card)
+	Motion.cancel(card_detail_body, "text_reveal")
+	if is_instance_valid(_detail_big_card): Motion.cancel(_detail_big_card, "detail")
+	card_detail.visible = false
+
+
+func _on_card_detail_dim_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_handle_detail_click(event, card_detail, _detail_big_card, _close_card_detail)
+
+func _handle_detail_click(event: InputEventMouseButton, detail: Control, big: Control, close: Callable) -> void:
+	if detail.get_meta("closing", false): return
+	var point := detail.get_global_transform() * event.position
+	if big and is_instance_valid(big) and preload("res://scripts/card_geometry.gd").contains(big, point):
+		_poke_card(big)
+		return
+	var info: Control = detail.get_meta("info")
+	if info.get_global_rect().has_point(point): return
+	if big == null or not is_instance_valid(big) or (wetland and wetland.reduced_motion):
+		close.call()
+		return
+	detail.set_meta("closing", true)
+	var old: Tween = big.get_meta("fly_tween", null)
+	if old and old.is_valid(): old.kill()
+	var source: Control = big.get_meta("source_view", null)
+	var position := big.position
+	if source and is_instance_valid(source):
+		position = detail.get_global_transform().affine_inverse() * _card_gyro_center(source) - big.pivot_offset
+	var fly := Motion.tween(big, "return", "detail")
+	big.set_meta("fly_tween", fly)
+	fly.tween_property(big, "position", position, Motion.seconds("return"))
+	fly.parallel().tween_property(big, "scale", Vector2.ONE, Motion.seconds("return"))
+	fly.parallel().tween_property(big, "rotation", source.rotation if is_instance_valid(source) else 0.0, Motion.seconds("return"))
+	fly.tween_callback(close)
+
+
+## 卡牌详情弹层（覆盖在牌库查看器之上）
+func _build_card_detail() -> void:
+	card_detail = Control.new()
+	card_detail.set_anchors_preset(Control.PRESET_FULL_RECT)
+	card_detail.mouse_filter = Control.MOUSE_FILTER_STOP
+	card_detail.visible = false
+	deck_viewer.add_child(card_detail)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.55)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.gui_input.connect(_on_card_detail_dim_input)
+	card_detail.add_child(dim)
+
+	card_detail_card = CenterContainer.new()
+	card_detail_card.anchor_left = 0.0
+	card_detail_card.anchor_right = 0.5
+	card_detail_card.anchor_top = 0.0
+	card_detail_card.anchor_bottom = 1.0
+	card_detail_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	card_detail.add_child(card_detail_card)
+
+	var info := PanelContainer.new()
+	info.anchor_left = 0.52
+	info.anchor_right = 0.98
+	info.anchor_top = 0.08
+	info.anchor_bottom = 0.92
+	_panel_style(info, Color(0.24, 0.17, 0.11, 0.96))
+	card_detail.add_child(info)
+	card_detail.set_meta("info", info)
+	info.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var iv := VBoxContainer.new()
+	iv.add_theme_constant_override("separation", 10)
+	info.add_child(iv)
+
+	card_detail_title = _make_label("", 30, Color(1, 0.9, 0.55))
+	card_detail_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	iv.add_child(card_detail_title)
+
+	var sep := HSeparator.new()
+	iv.add_child(sep)
+
+	card_detail_body = RichTextLabel.new()
+	card_detail_body.bbcode_enabled = true
+	card_detail_body.fit_content = true
+	card_detail_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	card_detail_body.add_theme_font_size_override("normal_font_size", _snap_px(16))
+	card_detail_body.add_theme_color_override("default_color", Color(0.96, 0.94, 0.9))
+	iv.add_child(card_detail_body)
+
+	iv.add_child(_make_label("点击空白处返回", 12, Color("8eaaa8")))
+
+
+# ==================== 知识卡图鉴（主页入口）====================
+## 主页「知识卡」按钮 → 全屏图鉴。交互与反馈**照搬牌库查看器**：
+## 同一套卡牌网格、同一个悬停浮起 + 黄框 + 陀螺仪透视倾斜、同一套逐张发牌动画、
+## 同一个「点一下 → 大牌飞到左边 + 右边打字机」的详情弹层。
+##
+## 两处不同（都是刻意的）：
+##   ① 未收集的卡整张走灰调、不透露名称与类别，正中一个「？」；
+##   ② 它挂在自己的 CanvasLayer(11) 上，因为入口在开始页，而开始页在 MenuLayer(10)。
+##
+## 构建只在 _build_ui 里跑一次；内容每次打开重建（刚打完一局回来立刻点亮新卡）。
+
+func _build_knowledge_viewer() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "KnowledgeViewerLayer"
+	layer.layer = 11        # 盖在 MenuLayer(10) 之上 —— 开始页的标题与选项都要让位
+	add_child(layer)
+
+	knowledge_viewer = Control.new()
+	knowledge_viewer.set_anchors_preset(Control.PRESET_FULL_RECT)
+	knowledge_viewer.mouse_filter = Control.MOUSE_FILTER_STOP
+	knowledge_viewer.visible = false
+	layer.add_child(knowledge_viewer)
+
+	# 与牌库同款压暗：开始页的沙盘背景在底下仍然隐约可见
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.68)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	knowledge_viewer.add_child(dim)
+
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.offset_left = 70
+	box.offset_right = -70
+	box.offset_top = 40
+	box.offset_bottom = -40
+	box.add_theme_constant_override("separation", 12)
+	knowledge_viewer.add_child(box)
+
+	var title_bar := HBoxContainer.new()
+	title_bar.add_theme_constant_override("separation", 10)
+	box.add_child(title_bar)
+
+	var title := _make_label("知识卡图鉴", 28, Color(1, 0.9, 0.55))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title_bar.add_child(title)
+
+	knowledge_count_label = _make_label("", 16, Color(0.72, 0.88, 0.92))
+	knowledge_count_label.custom_minimum_size = Vector2(150, 0)
+	knowledge_count_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	knowledge_count_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	title_bar.add_child(knowledge_count_label)
+
+	var scroll := ScrollContainer.new()
+	knowledge_scroll = scroll
+	MotionScroll.attach(scroll)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(scroll)
+
+	# 与牌库同一处理：四周留内边距，免得顶行/左列卡在放大漂浮时被裁剪
+	var margin := MarginContainer.new()
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_theme_constant_override("margin_top", 30)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	scroll.add_child(margin)
+
+	knowledge_grid = HFlowContainer.new()
+	knowledge_grid.add_theme_constant_override("h_separation", 14)
+	knowledge_grid.add_theme_constant_override("v_separation", 14)
+	knowledge_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_child(knowledge_grid)
+
+	# 与牌库查看器同一个措辞（那边底部也是「关闭」），
+	# 免得和图鉴里的详情弹层（「返回」）撞名 —— 两个白字按钮叠在一起会分不清点哪个。
+	var close := _make_button("关闭", _close_knowledge_viewer, 20)
+	close.custom_minimum_size = Vector2(0, 48)
+	box.add_child(close)
+
+	_build_knowledge_detail()
+
+
+func _show_knowledge_panel() -> void:
+	_open_knowledge_viewer()
+
+
+func _open_knowledge_viewer() -> void:
+	if knowledge_viewer.visible:
+		return
+	knowledge_viewer.visible = true
+	MotionScroll.reset_to_top(knowledge_scroll)
+	# 开始页的标题与选项列先让位（图鉴是一整屏）
+	menu_col.visible = false
+	_deck_gyro_view = null
+
+	# 重建全部卡牌（每次打开都按「当前收集状态」重铺 —— 刚打完一局回来，
+	# 新收集到的卡要立刻点亮，不能靠缓存）
+	for c in knowledge_grid.get_children():
+		knowledge_grid.remove_child(c)
+		c.queue_free()
+	_deck_gyro_view = null
+
+	knowledge_count_label.text = "已收集 %d / %d" % [Knowledge.collected_count(), Knowledge.total_count()]
+
+	var views: Array = []
+	for kid in Knowledge.all_ids():
+		var collected: bool = Knowledge.is_collected(kid)
+		var panel: PanelContainer = _make_knowledge_card(kid, collected)
+		var view := _make_gyro_card_view(panel)
+		# 悬停 / 取消悬停要用「这张牌自己的」两套底色（未收集的是灰纸，不是行动卡那张纸卡）
+		view.set_meta("base_style", _knowledge_card_style(collected))
+		view.set_meta("hover_style", _knowledge_card_style(collected, true))
+		view.tooltip_text = _knowledge_tooltip(kid, collected)
+		view.scale = Vector2(0.3, 0.3)
+		view.modulate.a = 0.0
+		# 悬停 / 移出直接复用牌库那对函数（它们只看 meta["panel"]，与卡内容无关）
+		view.mouse_entered.connect(_on_viewer_card_hover.bind(view, {}))
+		view.mouse_exited.connect(_on_viewer_card_unhover.bind(view))
+		view.gui_input.connect(_on_knowledge_card_click.bind(view, kid))
+		knowledge_grid.add_child(view)
+		views.append(view)
+
+	# 等一帧布局完成后逐张发牌（与牌库同节奏）
+	await get_tree().process_frame
+	MotionScroll.reset_to_top(knowledge_scroll)
+	for i in views.size():
+		var p: Control = views[i]
+		var tw := Motion.tween(p, "enter", "arrival")
+		tw.tween_property(p, "scale", Vector2.ONE, 0.28).set_delay(Motion.stagger("enter", i))
+		tw.parallel().tween_property(p, "modulate:a", 1.0, 0.18).set_delay(Motion.stagger("enter", i))
+
+
+func _close_knowledge_viewer() -> void:
+	if knowledge_viewer == null:
+		return
+	_close_knowledge_detail()
+	knowledge_viewer.visible = false
+	_deck_gyro_view = null
+	menu_col.visible = true
+
+
+func _on_knowledge_card_click(event: InputEvent, view: Control, kid: String) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_poke_card(view)
+		_show_knowledge_detail(view, kid)
+
+
+func _knowledge_tooltip(kid: String, collected: bool) -> String:
+	if not collected:
+		return "尚未收集的知识卡"
+	var k: Dictionary = GameState.KNOWLEDGE_CARDS[kid]
+	return "%s\n\n%s" % [str(k["short"]), str(k["ecology"])]
+
+
+## 知识卡卡面（图鉴网格 / 详情大图共用）。
+## 与 _make_card 同规格的 122×165；未收集时整张走灰调、内容只留「？」。
+func _make_knowledge_card(kid: String, collected: bool) -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.set_script(preload("res://scripts/card_hit_panel.gd"))
+	panel.custom_minimum_size = Vector2(122, 165)
+	panel.size = Vector2(122, 165)
+	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	panel.add_theme_stylebox_override("panel", _knowledge_card_style(collected))
+	var k: Dictionary = GameState.KNOWLEDGE_CARDS.get(kid, {})
+	# category 传**知识卡类别**（植物 / 鸟类 / …）：画好的卡面按类别取，卡照（photos/<kid>.png）
+	# 方图贴进卡面中间、卡名写到方图下面，字号由 PixelCardArt.face_photo_plan() 自动退让。
+	# 未收集的不传类别也不传卡照 —— 统一用「未知」卡面，不泄露它属于哪一类、也不提前露出照片。
+	PixelCardArt.add_face(panel, str(k.get("name", "")) if collected else "？",
+		"知识卡" if collected else "未收集", not collected, "",
+		collected and kid == "egg_dixinhu", str(k.get("category", "")) if collected else "",
+		_knowledge_photo(kid) if collected else null)
+	if collected and kid == "egg_dixinhu":
+		var rim := ColorRect.new()
+		rim.name = "KnowledgeFoil"
+		rim.set_meta("card_gyro_overlay", true)
+		rim.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+		rim.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		var foil := ShaderMaterial.new()
+		foil.shader = preload("res://scripts/knowledge_foil.gdshader")
+		foil.set_shader_parameter("card_mask", PixelCardArt.KNOWLEDGE_FACE_EGG)
+		rim.material = foil
+		panel.add_child(rim)
+		rim.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	return panel
+
+
+## 测试皮肤的框线与行动卡共用；未收集状态由像素卡图的调暗保留。
+func _knowledge_card_style(_collected: bool, hovered: bool = false) -> StyleBoxFlat:
+	return VisualTheme.card_style(hovered)
+
+
+func _knowledge_category_color(cat: String) -> Color:
+	return KNOWLEDGE_CATEGORY_COLORS.get(cat, Color("8a8f93"))
+
+
+## 按 KNOWLEDGE_ART_TILE 取一格图集片。行动卡用的是 VisualTheme.illustration（按类别列 + id hash），
+## 知识卡的类别和行动卡三分法对不上，所以直接自己拼 AtlasTexture。
+func _knowledge_art(kid: String) -> Texture2D:
+	if kid == "egg_dixinhu":
+		return preload("res://assets/dixinhu.jpg")
+	var tile_pos: Vector2i = KNOWLEDGE_ART_TILE.get(kid, Vector2i(0, 0))
+	var art: Texture2D = VisualTheme.ART
+	var tile := Vector2(art.get_width() / 3.0, art.get_height() / 2.0)
+	var atlas := AtlasTexture.new()
+	atlas.atlas = art
+	atlas.region = Rect2(Vector2(tile_pos) * tile, tile)
+	atlas.filter_clip = true
+	return atlas
+
+
+## 知识卡卡照：按卡 id 取 res://assets/art/knowledge/photos/<kid>.png。
+## 没这张图（彩蛋卡、或者图还没导）就返回 null —— 调用方一律按 null 处理，不报错。
+func _knowledge_photo(kid: String) -> Texture2D:
+	if _knowledge_photo_cache.has(kid):
+		return _knowledge_photo_cache[kid]
+	var path := KNOWLEDGE_PHOTO_DIR + kid + ".png"
+	var tex: Texture2D = load(path) if ResourceLoader.exists(path) else null
+	_knowledge_photo_cache[kid] = tex
+	return tex
+
+
+## 详情：左大牌 + 右介绍框（打字机）—— 与牌库的卡牌详情同一套演出。
+## 未收集的卡不透露任何资料，标题与正文都只给「？」。
+func _show_knowledge_detail(view: Control, kid: String) -> void:
+	var collected: bool = Knowledge.is_collected(kid)
+	knowledge_detail.visible = true
+	knowledge_detail.set_meta("closing", false)
+	if _knowledge_big_card != null and is_instance_valid(_knowledge_big_card):
+		Motion.release_face(_knowledge_big_card)
+		_knowledge_big_card.queue_free()
+		_knowledge_big_card = null
+	var big: PanelContainer = _make_knowledge_card(kid, collected)
+	big.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	big.pivot_offset = Vector2(61, 82.5)
+	big.set_meta("shadow_preserve_size", true)
+	_bind_card_gyro(big)
+	big.set_meta("gyro_x", 0.0)
+	big.set_meta("gyro_y", 0.0)
+	_knowledge_big_card = big
+	big.set_meta("source_view", view)
+	_poke_card(big)
+	# 起始：被点击卡牌的屏幕中心；终点：左侧展示区中心
+	var src_center := _card_gyro_center(view)
+	var dst_center := knowledge_detail_card.get_global_rect().get_center()
+	var inv := knowledge_detail.get_global_transform().affine_inverse()
+	var src_local: Vector2 = inv * src_center - big.pivot_offset
+	var dst_local: Vector2 = inv * dst_center - big.pivot_offset
+	big.position = src_local
+	big.scale = Vector2.ONE
+	knowledge_detail.add_child(big)
+	Motion.borrow_face(big, view)
+	_step_card_gyro(big, Vector2.ZERO, 0.0)
+	if wetland and wetland.reduced_motion:
+		big.position = dst_local
+		big.scale = Vector2(1.8, 1.8)
+		big.rotation = 0.0
+	else:
+		var fly := Motion.tween(big, "carry", "detail")
+		big.set_meta("fly_tween", fly)
+		fly.tween_property(big, "position", dst_local, Motion.seconds("carry"))
+		fly.parallel().tween_property(big, "scale", Vector2(1.8, 1.8), Motion.seconds("carry"))
+		fly.parallel().tween_property(big, "rotation", 0.0, Motion.seconds("carry"))
+	knowledge_detail_title.text = str(GameState.KNOWLEDGE_CARDS[kid]["name"]) if collected else "？？？"
+	knowledge_detail_body.text = _knowledge_detail_text(kid, collected)
+	knowledge_detail_source.text = ""
+	Motion.cancel(knowledge_detail_body, "text_reveal")
+	if wetland and wetland.reduced_motion:
+		knowledge_detail_body.visible_characters = -1
+		return
+	knowledge_detail_body.visible_characters = 0
+	var total := knowledge_detail_body.get_total_character_count()
+	var tw := Motion.tween(knowledge_detail_body, "linear", "text_reveal")
+	Motion.curve(tw, "none")
+	tw.tween_property(knowledge_detail_body, "visible_characters", total, clampf(total * 0.03, 0.4, 2.5))
+
+
+func _knowledge_detail_text(kid: String, collected: bool) -> String:
+	if not collected:
+		return "[color=#8a8a8a]未收集[/color]\n\n这张知识卡还没有收集到。"
+	var k: Dictionary = GameState.KNOWLEDGE_CARDS[kid]
+	if kid == "egg_dixinhu":
+		return "[color=#e9b9ff]制作组彩蛋 · 狄鑫斛[/color]\n\n%s\n\n[b]画作作者[/b]：Oliveira\n[b]创作来源[/b]：%s\n\n%s\n%s" % [k["short"], k["origin"], k["ecology"], k["management"]]
+	var body := "[color=#8a8a8a]类别：%s[/color]\n\n" % str(k["category"])
+	if k.has("level"):
+		body += "[color=#8a8a8a]%s[/color]\n\n" % str(k["level"])
+	# 关联标签（与「危机 - 对策」同一套词表）：本回合打过带这些标签的牌，这张卡更容易出现
+	var ktags: Array = k.get("tags", [])
+	if not ktags.is_empty():
+		body += "[color=#8a8a8a]关联行动：%s[/color]\n\n" % " / ".join(ktags)
+	body += "%s\n\n" % str(k["short"])
+	body += "生态角色：%s\n\n" % str(k["ecology"])
+	body += "当前威胁：%s\n\n" % str(k["threat"])
+	body += "管理建议：%s" % str(k["management"])
+	return body
+
+
+func _close_knowledge_detail() -> void:
+	Motion.release_face(_knowledge_big_card)
+	Motion.cancel(knowledge_detail_body, "text_reveal")
+	if is_instance_valid(_knowledge_big_card): Motion.cancel(_knowledge_big_card, "detail")
+	knowledge_detail.visible = false
+
+
+func _on_knowledge_detail_dim_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		_handle_detail_click(event, knowledge_detail, _knowledge_big_card, _close_knowledge_detail)
+
+
+## 知识卡详情弹层（覆盖在图鉴查看器之上）
+func _build_knowledge_detail() -> void:
+	knowledge_detail = Control.new()
+	knowledge_detail.set_anchors_preset(Control.PRESET_FULL_RECT)
+	knowledge_detail.mouse_filter = Control.MOUSE_FILTER_STOP
+	knowledge_detail.visible = false
+	knowledge_viewer.add_child(knowledge_detail)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.55)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	dim.gui_input.connect(_on_knowledge_detail_dim_input)
+	knowledge_detail.add_child(dim)
+
+	knowledge_detail_card = CenterContainer.new()
+	knowledge_detail_card.anchor_left = 0.0
+	knowledge_detail_card.anchor_right = 0.5
+	knowledge_detail_card.anchor_top = 0.0
+	knowledge_detail_card.anchor_bottom = 1.0
+	knowledge_detail_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	knowledge_detail.add_child(knowledge_detail_card)
+
+	var info := PanelContainer.new()
+	info.anchor_left = 0.52
+	info.anchor_right = 0.98
+	info.anchor_top = 0.08
+	info.anchor_bottom = 0.92
+	_panel_style(info, Color(0.24, 0.17, 0.11, 0.96))
+	knowledge_detail.add_child(info)
+	knowledge_detail.set_meta("info", info)
+	info.mouse_filter = Control.MOUSE_FILTER_STOP
+
+	var iv := VBoxContainer.new()
+	iv.add_theme_constant_override("separation", 10)
+	info.add_child(iv)
+
+	knowledge_detail_title = _make_label("", 30, Color(1, 0.9, 0.55))
+	knowledge_detail_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	knowledge_detail_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	iv.add_child(knowledge_detail_title)
+
+	iv.add_child(HSeparator.new())
+
+	knowledge_detail_body = RichTextLabel.new()
+	knowledge_detail_body.bbcode_enabled = true
+	knowledge_detail_body.fit_content = false
+	knowledge_detail_body.scroll_active = true
+	knowledge_detail_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	knowledge_detail_body.add_theme_font_size_override("normal_font_size", _snap_px(16))
+	knowledge_detail_body.add_theme_color_override("default_color", Color(0.96, 0.94, 0.9))
+	iv.add_child(knowledge_detail_body)
+
+	# 出处栏：钉在滚动区外面，任何一张卡打开都能一眼看到卡照与资料的来源（可点开原页）。
+	knowledge_detail_source = RichTextLabel.new()
+	knowledge_detail_source.bbcode_enabled = true
+	knowledge_detail_source.fit_content = true
+	knowledge_detail_source.scroll_active = false
+	knowledge_detail_source.hide() # 版权与资料来源随作品放在 licenses 文档，不进入游戏界面。
+	knowledge_detail_source.add_theme_font_size_override("normal_font_size", _snap_px(16))
+	knowledge_detail_source.add_theme_color_override("default_color", Color(0.72, 0.78, 0.82))
+	iv.add_child(knowledge_detail_source)
+
+	iv.add_child(_make_label("点击空白处返回", 12, Color("8eaaa8")))
+
+
+func _on_start_pressed() -> void:
+	var s := seed_input.text.strip_edges()
+	if s == "" or s == "0":
+		GameState.run_seed = 0
+	elif s.is_valid_int() and int(s) >= 0:
+		GameState.run_seed = int(s)
+	else:
+		menu_hint.text = "种子："
+		return
+	_clear_save()           # 放弃（判负）上一局暂停的进度
+	if impact_feedback != null: impact_feedback.clear()
+	# 作废可能还在跑的算分动画（代次 +1）。新局的手牌稍后会由 _build_hand_panel()
+	# 整体重建并清空 card_infos，所以这里不必手工复位卡牌状态。
+	_score_anim_id += 1
+	_score_animating = false
+	_playing = true
+	_sort_animating = false
+	_hide_menu()
+	GameState.reset_game()
+	# 新的一局：拉杆回到默认的有效档（直接赋值 + 只刷拉杆外观 ——
+	# 此刻手牌还是上一局的残留对象，不能走 _set_play_tier 去刷牌面）
+	play_tier = "effective"
+	_refresh_lever_visuals(false)
+	_update_hud()
+	_update_3d()
+	_play_hud_enter()      # 开局登场：两块面板从屏幕外滑入
+
+	# 本局天赋：第一回合开始前显示一次（0 条也说明一句，顺带公布本局种子）
+	_show_run_talents_popup()
+
+
+## 开局天赋弹窗：本局随机附赠的词条（0~3 条）。
+## 这是新一局的第一屏 —— 玩家点掉后才轮到「第 1 回合 · 事件」弹窗（若有）与分配资金。
+func _show_run_talents_popup() -> void:
+	var ids: Array = Talents.granted
+	var body := "[color=#8a8a8a]本局种子：%d[/color]\n\n" % GameState.run_seed
+	if ids.is_empty():
+		body += "本局没有随机到额外天赋。\n"
+	else:
+		body += "本局天赋(%d 项)\n" % ids.size()
+		for id in ids:
+			var t: Dictionary = Talents.entry(str(id))
+			if t.is_empty():
+				continue
+			body += "\n[b]%s[/b]　%s" % [t["name"], t["desc"]]
+	if Talents.run_tree_count() > 0:
+		body += "\n\n[b]永久研修(%d 项，本局固定)[/b]\n" % Talents.run_tree_count() + Talents.run_tree_effect_summary()
+		body += "\n[color=#9dd5bd]在左上角永久研修提示中查看节点详情。[/color]"
+	else:
+		body += "\n\n[color=#9dd5bd]暂无永久研修。通关可获得灵感，在主菜单天赋树中分配。[/color]"
+	_show_popup("本局天赋", body, "开始", _on_run_talents_done)
+
+
+## 天赋弹窗点掉之后：把可能被它顶掉的「第 1 回合 · 事件」弹窗按原顺序补回来。
+## 事件弹窗是在 GameState.reset_game() 里同步弹出的，天赋弹窗必须压在它前面，
+## 所以只能这样接力（不能反过来改弹窗顺序：天赋是掷完种子才知道的）。
+func _on_run_talents_done() -> void:
+	if _current_phase == "popup_event" and _current_event != "":
+		_show_popup("第 %d 回合 · 事件" % GameState.turn, _current_event, "开始分配资金", _enter_allocate)
+	else:
+		_enter_allocate()
+
+
+## 开局登场：左侧「回合 / 资金」面板从屏幕左外滑入，右侧「生态指标」面板从右外滑入。
+## 方向与 _slide_side_panels 保持一致，落点就是两块面板的常驻位置。
+## 手感：QUART + EASE_OUT（起步快、收尾稳），右侧晚 0.08s 出发，两侧同时淡入。
+func _play_hud_enter() -> void:
+	if left_panel == null or right_panel == null:
+		return
+	const L_HOME_L := 18.0        # 左面板常驻位置
+	const L_HOME_R := 222.0
+	const R_HOME_L := -210.0     # 右面板常驻位置（锚在屏幕右缘，负值向左）
+	const R_HOME_R := -18.0
+	const GAP := 12.0            # 屏幕外的额外间隙
+	const DUR := 0.55            # 滑入时长（秒）
+	const LAG := 0.08            # 右侧延后出发
+
+	# 先瞬移到屏幕外（同帧完成，渲染时看不到中间状态）
+	left_panel.offset_left = -(L_HOME_R - L_HOME_L) - GAP
+	left_panel.offset_right = -GAP
+	right_panel.offset_left = GAP
+	right_panel.offset_right = (R_HOME_R - R_HOME_L) + GAP
+	left_panel.modulate.a = 0.0
+	right_panel.modulate.a = 0.0
+
+	var tw := Motion.tween(self, "linear")
+	tw.set_parallel(true)
+	Motion.curve(tw, "power3.out")
+	tw.tween_property(left_panel, "offset_left", L_HOME_L, DUR)
+	tw.tween_property(left_panel, "offset_right", L_HOME_R, DUR)
+	tw.tween_property(left_panel, "modulate:a", 1.0, DUR * 0.7)
+	tw.tween_property(right_panel, "offset_left", R_HOME_L, DUR).set_delay(LAG)
+	tw.tween_property(right_panel, "offset_right", R_HOME_R, DUR).set_delay(LAG)
+	tw.tween_property(right_panel, "modulate:a", 1.0, DUR * 0.7).set_delay(LAG)
+
+
+func _make_metric_row(metric: String) -> VBoxContainer:
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 1)
+
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 4)
+	vb.add_child(head)
+	# 图标留引用：算分动画要让它放大 + 抖动（原来这里是匿名创建的，拿不到节点）
+	# 图标用美术交付的 8×8 像素图，塞进和以前一样的 14×14 框（尺寸没变，面板不会溢出）
+	var icon := _make_art_icon(METRIC_ICONS[metric], 14.0)
+	icon.set_script(preload("res://scripts/metric_icon_effect.gd"))
+	icon.effects_owner = self
+	head.add_child(icon)
+	head.add_child(_make_label(GameState.METRIC_NAMES[metric], 12, Color(0.95, 0.95, 0.95)))
+	var val := _make_label("0", 12, METRIC_COLORS[metric])
+	val.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	val.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	head.add_child(val)
+
+	# 进度条 + 阈值红线：红线作为进度条的兄弟节点，避免被指标颜色 modulate 染色
+	var wrap := Control.new()
+	wrap.custom_minimum_size = Vector2(0, 11)
+	wrap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
+	var bar := ProgressBar.new()
+	bar.min_value = 0
+	bar.max_value = 100
+	bar.value = 0
+	bar.show_percentage = false
+	bar.add_theme_stylebox_override("background", UiSkin.progress_track())
+	bar.add_theme_stylebox_override("fill", UiSkin.progress_fill(METRIC_COLORS[metric]))
+	bar.set_anchors_preset(Control.PRESET_FULL_RECT)
+	bar.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrap.add_child(bar)
+	var bird_segments: Control
+	if metric == "birds":
+		bar.add_theme_stylebox_override("fill", StyleBoxEmpty.new())
+		bird_segments = Control.new()
+		bird_segments.set_script(preload("res://scripts/bird_metric_segments.gd"))
+		bird_segments.name = "BirdSegments"
+		bird_segments.bar = bar
+		bird_segments.effects_owner = self
+		bird_segments.tint = METRIC_COLORS[metric]
+		bird_segments.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		bird_segments.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		wrap.add_child(bird_segments)
+	var ripple := ColorRect.new()
+	ripple.set_script(preload("res://scripts/metric_bar_ripple.gd"))
+	ripple.name = "MetricRipple"
+	ripple.bar = bar
+	ripple.effects_owner = self
+	ripple.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	ripple.offset_left = 2
+	ripple.offset_right = -2
+	ripple.offset_top = 2
+	ripple.offset_bottom = -2
+	wrap.add_child(ripple)
+	if metric == "birds":
+		ripple.hide()
+		ripple.set_process(false)
+	var preview: Control = bird_segments
+	if metric != "birds":
+		preview = Control.new()
+		preview.set_script(preload("res://scripts/metric_bar_preview.gd"))
+		preview.name = "MetricPreview"
+		preview.effects_owner = self
+		preview.bar = bar
+		preview.tint = METRIC_COLORS[metric]
+		preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		preview.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		preview.hide()
+		preview.set_process(false)
+		wrap.add_child(preview)
+
+	var band: ColorRect
+	var high_line: ColorRect
+	var reference_label: Label
+	if metric == "water_level":
+		band = ColorRect.new()
+		band.color = Color(0.55, 0.95, 0.70, 0.24)
+		# Reference marks occupy only the top edge, leaving the blue fill continuous.
+		band.offset_bottom = 1.0
+		band.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		wrap.add_child(band)
+
+	# 阈值红线（像素竖线）：指标低于此线即判负；锚定在阈值比例处，随难度更新
+	var line := ColorRect.new()
+	if metric != "water_level":
+		line.set_script(preload("res://scripts/metric_threshold_line.gd"))
+	line.color = Color(1.0, 0.2, 0.2, 0.95)
+	line.anchor_left = 0.2
+	line.anchor_right = 0.2
+	line.offset_left = -1
+	line.offset_right = 1
+	line.anchor_top = 0.0
+	line.anchor_bottom = 1.0
+	line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	wrap.add_child(line)
+	if metric == "water_level":
+		line.color = Color(0.71, 0.92, 0.68, 0.45)
+		line.z_index = 10
+		line.anchor_bottom = 1.0
+		line.offset_top = -1.0
+		line.offset_bottom = 1.0
+		high_line = ColorRect.new()
+		high_line.color = line.color
+		high_line.z_index = 10
+		high_line.anchor_bottom = 1.0
+		high_line.offset_top = line.offset_top
+		high_line.offset_bottom = line.offset_bottom
+		high_line.offset_left = -1
+		high_line.offset_right = 1
+		high_line.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		wrap.add_child(high_line)
+
+	vb.add_child(wrap)
+	if metric in ["water_level", "birds"]:
+		reference_label = _make_label("", 10, Color("b6ebae"))
+		vb.add_child(reference_label)
+
+	metric_bars[metric] = {"bar": bar, "val": val, "line": line, "row": vb, "icon": icon,
+		"band": band, "high_line": high_line, "reference_label": reference_label, "ripple": ripple, "preview": preview,
+		"bird_segments": bird_segments}
+	return vb
+
+
+## 按「难度线 + 每指标偏移」更新指标条上的阈值红线位置
+## 六项的红线不再一样长：哪项更脆，线就更靠右，玩家一眼看得出来。
+func _update_threshold_lines() -> void:
+	for metric in metric_bars:
+		var line: ColorRect = metric_bars[metric].get("line")
+		if metric == "water_level":
+			var rule: Dictionary = GameState.water_reference()
+			var pressure: Dictionary = GameState.water_pressure(int(GameState.metrics.get(metric, 50)))
+			var low_ratio: float = float(rule["low"]) / 100.0
+			var high_ratio: float = float(rule["high"]) / 100.0
+			line.anchor_left = low_ratio
+			line.anchor_right = low_ratio
+			var high: ColorRect = metric_bars[metric]["high_line"]
+			high.anchor_left = high_ratio
+			high.anchor_right = high_ratio
+			var band: ColorRect = metric_bars[metric]["band"]
+			band.anchor_left = low_ratio
+			band.anchor_right = high_ratio
+			var reference: Label = metric_bars[metric]["reference_label"]
+			var status: String = {"safe": "适宜", "low": "偏低", "high": "偏高"}[pressure["side"]]
+			reference.text = "%s参考 %d–%d · %s" % [GameState.SEASON_NAMES[GameState.current_season()], rule["low"], rule["high"], status]
+			reference.add_theme_color_override("font_color", Color("b6ebae") if pressure["side"] == "safe" else Color("ffcc66"))
+			continue
+		if line != null:
+			var ratio: float = GameState.metric_display_line(metric) / 100.0
+			line.anchor_left = ratio
+			line.anchor_right = ratio
+			line.snap_to_pixels()
+		if metric == "birds":
+			var birds: Dictionary = GameState.bird_snapshot()
+			metric_bars[metric]["bird_segments"].configure(int(birds["base"]), int(birds["migrants"]))
+			var total: int = GameState.metric_failure_value("birds")
+			var health_line: int = GameState.failure_threshold_for("birds")
+			var label: Label = metric_bars[metric]["reference_label"]
+			label.text = "留湖 %d · 迁徙 %d · 生态红线 %d" % [birds["base"], birds["migrants"], health_line]
+			label.add_theme_color_override("font_color", Color("ffcc66") if total <= health_line + 5 else Color("b6ebae"))
+
+
+# ==================== 指标悬停小窗 ====================
+## 鼠标移到某一项指标上时，跟随指针弹出的小窗：
+## 本回合自然演化会掉多少 / 回合末大概落到哪 / 生态红线在哪 / 余量还剩多少；
+## 若已有「已预警、下回合结算时才爆发」的危机且正好打到这一项，也提前告诉你。
+## 数字全部来自 GameState.metric_hover_preview()（只读推演），这里只负责显示，不参与任何判定。
+## ⚠ 只给结果，不给解释：指标之间的因果链、难度对衰减的放大，都是**隐性参数**，
+##   玩家应该自己从数字里总结，不能写在这块板上。
+const METRIC_TIP_W := 244.0
+
+
+func _build_metric_tip(parent: Node) -> void:
+	metric_tip = PanelContainer.new()
+	metric_tip.custom_minimum_size = Vector2(METRIC_TIP_W, 0)
+	metric_tip.anchor_left = 0.0
+	metric_tip.anchor_top = 0.0
+	metric_tip.anchor_right = 0.0
+	metric_tip.anchor_bottom = 0.0
+	metric_tip.visible = false
+	_panel_style(metric_tip, Color(0.16, 0.12, 0.08, 0.96))
+	var tip_style := metric_tip.get_theme_stylebox("panel").duplicate() as StyleBox
+	tip_style.set_content_margin_all(8)
+	metric_tip.add_theme_stylebox_override("panel", tip_style)
+	parent.add_child(metric_tip)
+
+	var vb := VBoxContainer.new()
+	vb.add_theme_constant_override("separation", 2)
+	metric_tip.add_child(vb)
+
+	metric_tip_title = _make_label("", 14, Color(0.95, 0.95, 0.95))
+	vb.add_child(metric_tip_title)
+
+	metric_tip_body = RichTextLabel.new()
+	metric_tip_body.bbcode_enabled = true
+	metric_tip_body.fit_content = true
+	metric_tip_body.scroll_active = false
+	metric_tip_body.custom_minimum_size = Vector2(METRIC_TIP_W - 16, 0)
+	# 全工程最后一处绕过 _snap_px 的字号（写死 13 → 像素字体 12px，会被缩放糊掉）。
+	# 统一走 _snap_px 后落回 12px，与其它面板一致。
+	metric_tip_body.add_theme_font_size_override("normal_font_size", _snap_px(13))
+	metric_tip_body.add_theme_color_override("default_color", Color(0.90, 0.90, 0.88))
+	vb.add_child(metric_tip_body)
+
+	# 小窗只负责「看」：整棵子树都不接收鼠标。否则指针一进小窗，指标行的悬停就断了，会闪。
+	_ignore_mouse(metric_tip)
+
+
+## 递归关掉一棵子树的鼠标响应
+func _ignore_mouse(n: Node) -> void:
+	if n is Control:
+		(n as Control).mouse_filter = Control.MOUSE_FILTER_IGNORE
+	for c in n.get_children():
+		_ignore_mouse(c)
+
+
+## 每帧判断鼠标是否落在某个指标行上：是 → 刷新内容并跟随指针；否 → 收起
+## mouse_override 仅供自动化测试顶替真实鼠标，正常游戏不传（默认取真实鼠标位置）
+func _update_metric_tip(mouse_override: Vector2 = Vector2.INF) -> void:
+	if metric_tip == null:
+		return
+	if not _tip_allowed():
+		metric_tip.visible = false
+		_tip_metric = ""
+		return
+	var mp: Vector2 = mouse_override if mouse_override != Vector2.INF else get_viewport().get_mouse_position()
+	var hovered := ""
+	for metric in metric_bars:
+		var row: Control = metric_bars[metric].get("row")
+		if row != null and row.is_visible_in_tree() and row.get_global_rect().has_point(mp):
+			hovered = str(metric)
+			break
+	if hovered == "":
+		metric_tip.visible = false
+		_tip_metric = ""
+		return
+	if hovered != _tip_metric:
+		_tip_metric = hovered
+		_tip_last_text = ""
+	_fill_metric_tip(hovered)
+	metric_tip.visible = true
+	_place_metric_tip(mp)
+
+
+## 什么时候允许显示：正常分配回合，且没有任何弹层盖在 HUD 上
+func _tip_allowed() -> bool:
+	# 算分动画期间关掉指标悬停小窗，否则鼠标扫过右侧面板弹的小窗会糊在算分小票上
+	if _score_animating:
+		return false
+	if _current_phase != "allocate" or _paused or GameState.game_over:
+		return false
+	if right_panel == null or not right_panel.is_visible_in_tree():
+		return false
+	if popup_root != null and popup_root.visible:
+		return false
+	if crisis_root != null and crisis_root.visible:
+		return false
+	if warn_panel_root != null and warn_panel_root.visible:
+		return false
+	if deck_viewer != null and deck_viewer.visible:
+		return false
+	if menu_root != null and menu_root.visible:
+		return false
+	if pause_root != null and pause_root.visible:
+		return false
+	return true
+
+
+## 小窗正文。每次都按当前数值重算 → 出牌/结算后数字不会停在上一回合
+func _fill_metric_tip(metric: String) -> void:
+	var p: Dictionary = GameState.metric_hover_preview(metric)
+	metric_tip_title.text = "%s   %d" % [str(GameState.METRIC_NAMES.get(metric, metric)), int(p["cur"])]
+	metric_tip_title.add_theme_color_override("font_color", METRIC_COLORS.get(metric, Color(0.92, 0.92, 0.92)))
+	if metric == "water_level":
+		_fill_water_metric_tip(p)
+		return
+	if metric == "birds":
+		_fill_bird_metric_tip(p)
+		return
+
+	var cur: int = int(p["cur"])
+	var kind: String = str(p["kind"])
+	var nat_min: int = int(p["nat_min"])
+	var nat_max: int = int(p["nat_max"])
+	var end_min: int = int(p["end_min"])
+	var end_max: int = int(p["end_max"])
+
+	# 人鸟矛盾（暗线）：这一笔**并进「自然演化」那一栏**，不给它单独的醒目提示 ——
+	# 玩家看到的是「自然演化 −N」，想明白为什么就自己把候鸟与食源的差距算一遍。
+	# 只有被它扣的那两项（社区信任 / 候鸟种群）带上这笔；数值与实际结算同源（同一个入口）。
+	var cf: Dictionary = p.get("conflict", {})
+	var cf_pen: int = 0
+	if bool(cf.get("active", false)) and (metric == "community" or metric == "birds"):
+		cf_pen = int(cf["penalty"])
+	# p 的自然预测已经先应用人鸟扣分，再按实际顺序推演，所以这里仅列明暗线扣分，
+	# 不再把它从预测结果重复扣一次。
+
+	# ① 本回合自然演化会掉多少（水位是随机，给区间）
+	var dtxt := ""
+	var dcol := "#8e9aa4"
+	if kind == "random":
+		dtxt = "%+d ~ %+d" % [nat_min, nat_max]
+		dcol = "#ffcc66"
+	elif nat_min == 0 and nat_max == 0:
+		dtxt = "不变"
+	elif nat_min > 0:
+		dtxt = "%+d" % nat_min
+		dcol = "#7ee08a"
+	else:
+		dtxt = "%+d" % nat_min
+		dcol = "#ff8f7a"
+	var rows: Array = []
+	rows.append("[color=#cfd6dc]自然演化(含洪旱)[/color]   [color=%s][b]%s[/b][/color]" % [dcol, dtxt])
+	# 刻意不写「为什么」：水质怎么拖累植被、植被怎么影响候鸟这一类因果，是留给玩家自己悟的隐性参数。
+	# 人鸟矛盾同理：只报一个安静的小计，不给公式、不给原因
+	if cf_pen > 0:
+		rows.append("[color=#8e9aa4]· 其中人鸟矛盾 −%d[/color]" % cf_pen)
+
+	# ② 回合末大概落到哪
+	if kind == "random":
+		rows.append("[color=#cfd6dc]回合末约[/color]   [b]%d ~ %d[/b]" % [end_min, end_max])
+	else:
+		rows.append("[color=#cfd6dc]回合末约[/color]   [b]%d[/b] %s" % [end_min, _tip_delta_suffix(cur, end_min)])
+
+	# ③ 生态红线与两个余量
+	# ⚠ 必须写清是哪个余量。它们**不相等**：
+	#   当前余量   = 眼下的值 - 红线（水位 47、红线 37 → 10）
+	#   回合末余量 = 按本回合自然演化的**最坏一头**算（47 - 10 = 37，再减 37 → 0）
+	# 以前只写「余量」两个字，同一屏上又摆着 47 和 37，玩家会算成 10 而觉得是 bug。
+	var line: int = int(p["line"])
+	# ⚠ 余量也要用**调整后**的 end_min 算：同一个数不能两个口径（否则小窗上「回合末约 48」
+	#   和「回合末余量 3」（红线 50 时该是 −2）会自相矛盾）。
+	var margin: int = end_min - line
+	var cur_margin: int = int(p["cur"]) - line
+	var mcol := "#7ee08a"
+	if margin < 0:
+		mcol = "#ff5a5a"
+	elif margin <= 3:
+		mcol = "#ffcc66"
+	var ccol := "#7ee08a"
+	if cur_margin < 0:
+		ccol = "#ff5a5a"
+	elif cur_margin <= 3:
+		ccol = "#ffcc66"
+	rows.append("[color=#cfd6dc]生态红线[/color]   [color=#ff8080][b]%d[/b][/color]    [color=#cfd6dc]当前余量[/color] [color=%s][b]%d[/b][/color]" % [line, ccol, cur_margin])
+	rows.append("[color=#cfd6dc]回合末余量[/color]   [color=%s][b]%d[/b][/color]" % [mcol, margin])
+	# 难度怎么放大衰减也是隐性参数，不写出来（两档都玩两把自然就有数）
+	# ⚠ 用调整后的 end_min 重新判「会不会跌破」：人鸟矛盾那一笔也算进去，
+	#   否则小窗会一边显示回合末 48、一边说「仍在红线上」（红线 50）。
+	if end_min < line:
+		rows.append("[color=#ff5a5a][b]⚠ 回合末将跌破生态红线[/b][/color]")
+	elif margin <= 3:
+		rows.append("[color=#ffcc66]⚠ 回合末将贴近生态红线[/color]")
+
+	# ④ 预警中、下回合结算时才爆发的危机正好打到这一项
+	if int(p["crisis_delta"]) != 0:
+		rows.append("[color=#ffb060]⚠ 预警中：%s[/color]" % str(p["crisis_name"]))
+		var tail := "会跌破生态红线" if bool(p["break_total"]) else "仍在生态红线上"
+		rows.append("[color=#8e9aa4]· 下回合结算时 %+d → 约 %d，%s[/color]" % [int(p["crisis_delta"]), int(p["worst"]), tail])
+
+	var txt := ""
+	for r in rows:
+		txt += str(r) + "\n"
+	txt = txt.strip_edges()
+	if txt != _tip_last_text:
+		_tip_last_text = txt
+		metric_tip_body.text = txt
+
+
+func _fill_bird_metric_tip(p: Dictionary) -> void:
+	var line: int = int(p["line"])
+	var color := "#ffcc66" if int(p["end_min"]) <= line + 5 else "#7ee08a"
+	var birds := GameState.bird_snapshot()
+	var rows: Array[String] = [
+		"留湖 [b]%d[/b] · 迁徙 [b]%d[/b]" % [birds["base"], birds["migrants"]],
+		"生态红线 %d · 开局留湖 %d" % [line, GameState.bird_initial_residents],
+		"自然变化 %+d ~ %+d" % [int(p["nat_min"]), int(p["nat_max"])],
+		"[color=%s]回合末总量 %d ~ %d[/color]" % [color, int(p["end_min"]), int(p["end_max"])],
+		"[color=#8e9aa4]留湖＋迁徙总量低于生态红线即判负。[/color]",
+	]
+	var food_loss := GameState.wetland_food_loss()
+	var returns := GameState.winter_return_loss()
+	if food_loss > 0 or returns > 0:
+		rows.append("候鸟食物损失 %d · 本年迁入遗留 %d" % [food_loss, returns])
+	if str(p["crisis_name"]) != "":
+		rows.append("[color=#ffb060]%s：总量约 %d[/color]" % [str(p["crisis_name"]), int(p["worst"])])
+	if bool(p["break_total"]): rows.append("[color=#ff5a5a]⚠ 候鸟总量将跌破生态红线[/color]")
+	var text := "\n".join(rows)
+	if text != _tip_last_text:
+		_tip_last_text = text
+		metric_tip_body.text = text
+
+func _fill_water_metric_tip(p: Dictionary) -> void:
+	var rule: Dictionary = GameState.water_reference()
+	var drift: Array = GameState.water_drift_range()
+	var weather: Dictionary = GameState.year_hydrology()
+	var pressure: Dictionary = GameState.water_pressure(int(p["cur"]))
+	var season: String = GameState.current_season()
+	var rows: Array[String] = []
+	rows.append("[color=#b6ebae][b]%s·%s季参考 %d–%d[/b][/color](含端点)" % [GameState.difficulty_name(), GameState.SEASON_NAMES[season], rule["low"], rule["high"]])
+	rows.append("本年水情：%s(自然涨落修正 %+d)" % [weather["name"], weather["shift"]])
+	if pressure["side"] == "safe":
+		rows.append("[color=#7ee08a]当前在参考区间内[/color]")
+	else:
+		rows.append("[color=#ffcc66]当前%s %d 点 · 生态压力 ×%.2f[/color]" % ["偏低" if pressure["side"] == "low" else "偏高", pressure["deviation"], pressure["multiplier"]])
+	# 与顶部横幅同一条线：偏离 ≥ WATER_ALERT_MARGIN 点才升格成「预警」，区间内外的小抖动只写偏低/偏高。
+	if int(pressure["deviation"]) >= GameState.WATER_ALERT_MARGIN:
+		rows.append("[color=#ffb060]⚠ %s预警：已偏离参考区间 %d 点[/color]" % ["干旱" if pressure["side"] == "low" else "洪水", int(pressure["deviation"])])
+	rows.append("自然涨落 [b]%+d ~ %+d[/b] → 回合末水位 [b]%d ~ %d[/b]" % [drift[0], drift[1], p["end_min"], p["end_max"]])
+	var losses: Array[String] = []
+	var outcomes: Array = GameState.natural_evolution_outcomes()
+	for metric in GameState.METRIC_NAMES:
+		var lo := 0
+		var hi := -100
+		for outcome in outcomes:
+			var d: int = int(outcome["pressure_losses"].get(metric, 0))
+			lo = mini(lo, d)
+			hi = maxi(hi, d)
+		if lo < 0:
+			losses.append("%s %s" % [GameState.METRIC_NAMES[metric], "%+d" % lo if lo == hi else "%+d ~ %+d" % [lo, hi]])
+	rows.append("[color=#ffb060]回合末洪旱额外损失：[/color]" if not losses.is_empty() else "[color=#7ee08a]预计回合末无洪旱额外损失[/color]")
+	if not losses.is_empty(): rows.append("；".join(losses))
+	if pressure["side"] != "safe":
+		rows.append("候鸟种群受栖息地影响。")
+	var legacy := GameState.pending_water_legacy()
+	for effect in GameState.crisis_legacy_effects(GameState.pending_crisis):
+		if str(effect["kind"]) == "water": legacy += int(effect["delta"])
+	if legacy != 0: rows.append("[color=#ffb060]秋季开局遗留：水位 %+d[/color]" % legacy)
+	var next_season: String = GameState.SEASONS[(GameState.SEASONS.find(season) + 1) % 4]
+	var next_rule: Dictionary = GameState.water_reference(next_season)
+	if GameState.turn < GameState.TOTAL_TURNS:
+		rows.append("下季%s：参考 %d–%d，提前留出调度空间。" % [GameState.SEASON_NAMES[next_season], next_rule["low"], next_rule["high"]])
+	if int(p["crisis_delta"]) != 0:
+		rows.append("[color=#ffb060]预警：%s，下回合水位 %+d[/color]" % [p["crisis_name"], p["crisis_delta"]])
+	var txt := "\n".join(rows)
+	if txt != _tip_last_text:
+		_tip_last_text = txt
+		metric_tip_body.text = txt
+
+
+func _tip_delta_suffix(from_v: int, to_v: int) -> String:
+	var d: int = to_v - from_v
+	if d == 0:
+		return "(不变)"
+	return "(%+d)" % d
+
+
+## 跟随指针：默认贴在指针左侧；指针右侧是右侧指标面板，所以再限一道「不许压住面板」
+func _place_metric_tip(mp: Vector2) -> void:
+	metric_tip.reset_size()
+	var s: Vector2 = metric_tip.size
+	var vp: Vector2 = get_viewport().get_visible_rect().size
+	var limit_x: float = vp.x - 8.0
+	if right_panel != null and right_panel.is_visible_in_tree():
+		limit_x = minf(limit_x, right_panel.get_global_rect().position.x - 8.0)
+	var pos := Vector2(mp.x - s.x - 16.0, mp.y - s.y * 0.5)
+	pos.x = clampf(pos.x, 8.0, maxf(8.0, limit_x - s.x))
+	var banner_bottom := event_label.get_global_rect().end.y + 8.0 if event_label else 8.0
+	pos.y = maxf(pos.y, banner_bottom)
+	if staged_board and staged_board.is_visible_in_tree():
+		var board := staged_board.get_global_rect().grow(8.0)
+		if board.intersects(Rect2(pos, s)):
+			pos.y = board.end.y
+	pos.y = clampf(pos.y, 8.0, maxf(8.0, vp.y - s.y - 8.0))
+	metric_tip.position = pos
+
+
+func _update_hud() -> void:
+	_metric_preview_dirty = true
+	_update_threshold_lines()
+	var m: Dictionary = GameState.metrics
+	# 算分动画期间**只**冻结指标条与数值 —— 这两样由动画逐项驱动，
+	# 若在这里一次性刷到终值，动画还没播就先跳完了。
+	# ⚠ 不能整体 return：所有 metrics_changed / funds_changed 都在动画开始**之前**
+	#   就发完了，整体早退会让左侧「回合/资金/科研」停在旧值，2.8s 后再"啪"地跳一次。
+	if not _score_animating:
+		for metric in metric_bars:
+			var bar: ProgressBar = metric_bars[metric]["bar"]
+			var val: Label = metric_bars[metric]["val"]
+			# 指标变化不是玩家直接操作 → 用动画"告知"变化（速查表：非用户触发可较长时长）
+			var target := float(m[metric])
+			var active: Tween = bar.get_meta("motion_value") if bar.has_meta("motion_value") else null
+			var same_target := is_equal_approx(float(bar.get_meta("metric_value_target", INF)), target)
+			if not same_target or (not is_equal_approx(bar.value, target) and (active == null or not active.is_valid())):
+				bar.set_meta("metric_value_target", target)
+				Motion.cancel(bar, "value")
+				if not is_equal_approx(bar.value, target):
+					var tw := Motion.tween(bar, "linear", "value")
+					Motion.curve(tw, "power2.out")
+					tw.tween_property(bar, "value", target, 0.35)
+			val.text = str(m[metric])
+
+	var t: int = GameState.turn
+	turn_label.text = "第 %d / %d 回合" % [t, GameState.TOTAL_TURNS]
+	var year: int = int((t - 1) / 4) + 1
+	# 季节从 GameState 取（那里是唯一推导处），名字与旁白也一并取，
+	# 免得界面自己再维护一份 %4 映射、跟机制层对不上。
+	var season: String = GameState.current_season()
+	season_label.text = "第 %d 年 · %s" % [year, GameState.SEASON_NAMES.get(season, "")]
+	season_tagline.text = str(GameState.SEASON_TAGLINE.get(season, "")) + "\n" + str(GameState.year_hydrology()["name"])
+	var season_index: int = GameState.SEASONS.find(season)
+	if season_index >= 0 and season_index != _season_dial_index:
+		_season_dial_index = season_index
+		if season_dial != null:
+			season_dial.turn_to(season_index, t > 1)
+	spent_label.text = "已消耗：%d 万" % GameState.total_spent
+	_update_turn_budget_label()
+	research_label.text = "科研点：%d" % GameState.research_points
+	# 行动位仍由游戏规则限制，右下角不再显示常驻说明。
+	if action_hint != null:
+		action_hint.text = ""
+		action_hint.visible = false
+	_refresh_event_banner()
+	_update_selected_label()
+	_refresh_warn_bar()
+	_refresh_run_talents()      # 左上「本局天赋」常驻行（内容没变时直接跳过）
+	_refresh_action_buttons()   # 紧急调度 / 刷新手牌 的可用态
+
+
+# ==================== 顶部态势横幅 ====================
+## 顶部横幅显示的**永远是当前状态**，不是本回合开始时写死的那句话 ——
+## _update_hud() 每次指标/资金/回合变化都会调它，所以水位一沉下去，
+## 横幅下一帧就变成「干旱预警」；水位涨上来就变成「洪水预警」，不会出现
+## 「水位 80 还挂着干旱」这种和游戏对不上的念稿（0.1.17 修的就是这个）。
+## 唯一的例外是危机弹层：预警/爆发期间横幅让位给危机，弹层关掉后自动回到实时态势。
+func _refresh_event_banner() -> void:
+	if event_label == null:
+		return
+	var s: String = ""
+	if _banner_override != "":
+		s = _banner_override
+	else:
+		s = GameState.situation_banner()
+	if s.strip_edges() == "":
+		s = "暂无"
+	if event_label.text != s:
+		event_label.text = s
+		_layout_event_banner.call_deferred()
+
+
+func _layout_event_banner() -> void:
+	if not event_label or not staged_board: return
+	var top := 18.0 + event_label.size.y + 12.0
+	_ui_slide_origin[staged_board] = [-562.0, top, -222.0, top + 124.0]
+	if _deck_open or (dispatch_panel and dispatch_panel.visible): return
+	if is_equal_approx(staged_board.offset_top, top): return
+	staged_board.offset_top = top
+	staged_board.offset_bottom = top + 124.0
+	if not _score_animating: _layout_fan.call_deferred()
+
+
+# ==================== 事件 / 结算 / 知识卡 / 报告 ====================
+func _on_event(text: String) -> void:
+	_current_event = text
+	_current_phase = "popup_event"
+	# 新回合的态势播报盖过上一回合残留的危机横幅
+	_banner_override = ""
+	_update_hud()
+	hand_panel.visible = false
+	bottom_right.visible = false
+	tier_lever.visible = false
+	_show_popup("第 %d 回合 · 事件" % GameState.turn, text, "开始分配资金", _enter_allocate)
+
+
+## 画左上「本局天赋」常驻区：每局开局掷出的 0~3 条词条。
+## ⚠ 本函数被 _update_hud() 调得很勤（指标/资金一变就调），所以拿签名做缓存：
+##   词条列表没变就直接返回，绝不每帧重建节点。
+func _refresh_run_talents() -> void:
+	if talents_row == null:
+		return
+	var sig := ",".join(Talents.granted) + JSON.stringify(Talents.run_tree_ranks)
+	if sig == _talents_sig:
+		return
+	_talents_sig = sig
+	for c in talents_row.get_children():
+		talents_row.remove_child(c)
+		c.queue_free()
+	if Talents.run_tree_count() > 0:
+		var study := _make_label("永久研修：%d 节点" % Talents.run_tree_count(), 12, VisualTheme.MINT)
+		study.mouse_filter = Control.MOUSE_FILTER_PASS
+		study.tooltip_text = "本局固定的永久研修：\n" + Talents.run_tree_summary()
+		talents_row.add_child(study)
+	if Talents.granted.is_empty():
+		talents_row.add_child(_make_label("本局无额外天赋", 12, Color(0.68, 0.66, 0.62)))
+		return
+	for id in Talents.granted:
+		var t: Dictionary = Talents.entry(str(id))
+		if t.is_empty():
+			continue
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 4)
+		var nm := _make_label(str(t["name"]), 12, Color(1, 0.88, 0.55))
+		nm.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(nm)
+		var ef := _make_label(str(t["desc"]), 11, Color(0.88, 0.90, 0.92))
+		ef.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		ef.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+		ef.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		ef.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART   # 名字长的词条不至于被裁
+		row.add_child(ef)
+		row.tooltip_text = "%s　%s" % [str(t["name"]), str(t["desc"])]
+		talents_row.add_child(row)
+
+
+func _enter_allocate() -> void:
+	_current_phase = "allocate"
+	_slide_side_panels(false)  # 新回合开始，侧边栏弹回
+	# 季节首回合保底：保证每年开局手上有当季专属卡（见 GameState._ensure_one_season_card）
+	current_hand = GameState.draw_cards(7 + int(Talents.get_bonus("cards")), GameState.is_season_opener())
+	var deal_id := _score_anim_id
+	_sort_animating = true
+	await _prepare_hand_art(current_hand)
+	if deal_id != _score_anim_id: return
+	_sort_animating = false
+	play_deal_anim = true
+	_build_hand_panel()
+	_sync_dispatched_stage_cards()
+	hand_panel.visible = true
+	bottom_right.visible = true
+	tier_lever.visible = true
+	# 新回合：刷新按钮复原（上回合碎裂掉的碎片早已掉出屏幕，这里把本体恢复出来）
+	_refresh_used_turn = -1
+	# 档位冷却也一起归零：不然上一回合末尾刚拨过拉杆，新回合一开始就点不动。
+	_lever_cooldown_ms = -6000
+	if refresh_btn != null:
+		refresh_btn.modulate.a = 1.0
+	_close_dispatch_panel()
+	_update_hud()
+	_refresh_allocation_controls()
+
+
+# ==================== 紧急调度 / 刷新手牌 ====================
+
+## 刷新两个「花钱换牌」按钮的可用态与文案。
+## 由 _update_hud() 频繁调用 —— 只改文本与 disabled，**绝不重建节点**。
+func _refresh_action_buttons() -> void:
+	if _allocation_controls_locked():
+		if refresh_btn: refresh_btn.disabled = true
+		if dispatch_btn: dispatch_btn.disabled = true
+		return
+	if dispatch_btn != null:
+		var cd: int = GameState.dispatch_cooldown_left()
+		if not GameState.dispatched_cards.is_empty():
+			dispatch_btn.text = "已调度 · 待结算"
+			dispatch_btn.disabled = true
+		elif cd > 0:
+			dispatch_btn.text = "紧急调度 · 冷却 %d 回合" % cd
+			dispatch_btn.disabled = true
+		elif GameState.funds < GameState.dispatch_cost() + _committed_funds():
+			dispatch_btn.text = "紧急调度 · %d 万(预算不足)" % GameState.dispatch_cost()
+			dispatch_btn.disabled = true
+		else:
+			# 价格是**递增**的：本局每用过一次 +10 万，所以这里必须每次重算
+			dispatch_btn.text = "紧急调度 · %d 万" % GameState.dispatch_cost()
+			dispatch_btn.disabled = false
+	if refresh_btn != null:
+		var spent := _refresh_used_turn == GameState.turn
+		if refresh_btn.get_meta("refresh_spent_appearance", false) != spent:
+			if not refresh_btn.has_meta("refresh_original_disabled_style"):
+				refresh_btn.set_meta("refresh_original_disabled_style", refresh_btn.get_theme_stylebox("disabled"))
+				refresh_btn.set_meta("refresh_original_focus_style", refresh_btn.get_theme_stylebox("focus"))
+			refresh_btn.add_theme_stylebox_override("disabled", StyleBoxEmpty.new() if spent else refresh_btn.get_meta("refresh_original_disabled_style"))
+			refresh_btn.add_theme_stylebox_override("focus", StyleBoxEmpty.new() if spent else refresh_btn.get_meta("refresh_original_focus_style"))
+			refresh_btn.set_meta("refresh_spent_appearance", spent)
+		if _refresh_used_turn == GameState.turn:
+			refresh_btn.text = "本回合已刷新"
+			refresh_btn.disabled = true
+		elif _refreshable_hand_count() == 0:
+			refresh_btn.text = "暂无可刷新手牌"
+			refresh_btn.disabled = true
+		elif GameState.funds < GameState.REFRESH_HAND_COST:
+			refresh_btn.text = "刷新手牌 · %d 万(资金不足)" % GameState.REFRESH_HAND_COST
+			refresh_btn.disabled = true
+		else:
+			refresh_btn.text = "刷新手牌 · %d 万" % GameState.REFRESH_HAND_COST
+			refresh_btn.disabled = false
+
+
+## Only ordinary cards still in the hand are exchanged; table and dispatch cards stay.
+func _refreshable_hand_count() -> int:
+	var count := 0
+	for info in card_infos:
+		if not info.get("staged_by_drag", false) and not info.get("dispatched", false) and is_instance_valid(info.get("panel")):
+			count += 1
+	return count
+
+
+## 刷新手牌：固定花 5 万，剩几张换几张（当季卡池）。每回合限一次。
+## 用掉后按钮碎裂掉出屏幕，下回合 _enter_allocate() 复原。
+func _on_refresh_hand() -> void:
+	if _current_phase != "allocate" or _score_animating or _sort_animating:
+		return
+	if _refresh_used_turn == GameState.turn:
+		return
+	var replacement_count := _refreshable_hand_count()
+	if replacement_count == 0:
+		return
+	if not GameState.spend(GameState.REFRESH_HAND_COST):
+		return
+	_refresh_used_turn = GameState.turn
+	_refresh_action_buttons() # Synchronous used state, before gathering and art preparation.
+	var refresh_id := _score_anim_id
+	_sort_animating = true # Gathering owns the old hand until it reaches the deck.
+	_play_refresh_break_animation()
+	await _gather_refresh_hand()
+	if refresh_id != _score_anim_id: return
+	current_hand = GameState.draw_cards(replacement_count)
+	await _prepare_hand_art(current_hand)
+	if refresh_id != _score_anim_id: return
+	_sort_animating = false
+	_deal_sfx_turn = -1 # Refresh is a new audible batch, even after this turn's initial deal.
+	play_deal_anim = true
+	_build_hand_panel(true)
+	_update_hud()
+
+## At most one cold texture upload per frame; cached faces need no delay.
+func _prepare_hand_art(hand: Array) -> void:
+	var generation := _score_anim_id
+	for card in hand:
+		if generation != _score_anim_id: return
+		var cost := str(GameState.tier_cost(str(card["id"]), play_tier))
+		var key := str(card["name"]) + "\n" + cost + "\n" + str(card["category"])
+		if not PixelCardArt.textures.has(key):
+			PixelCardArt.texture(str(card["name"]), cost, str(card["category"]))
+			await get_tree().process_frame
+
+## Refresh returns only unplayed cards before drawing their replacements.
+func _gather_refresh_hand() -> void:
+	if wetland and wetland.reduced_motion: return
+	var source := deck_root.get_global_rect().position + Vector2(50, 43)
+	if not deck_backs.is_empty():
+		var back: Control = deck_backs.back()
+		source = back.get_global_transform() * (back.size * 0.5)
+	var pile := _screen_to_card_box(source)
+	var count := 0
+	for info in card_infos:
+		if info.get("staged_by_drag", false) or info.get("dispatched", false): continue
+		var panel: PanelContainer = info["panel"]
+		if not is_instance_valid(panel): continue
+		Motion.cancel(panel, "deal")
+		info["dealing"] = false
+		info["returning"] = true
+		info["flying"] = true
+		for key in ["position", "rotation", "scale"]: MotionSpring.stop(panel, key)
+		var target := pile - panel.pivot_offset + (panel.pivot_offset - panel.size * 0.5) * 0.52
+		var tw := Motion.tween(panel, "linear", "refresh_gather")
+		Motion.curve(tw, "power2.in")
+		tw.tween_property(panel, "position", target, 0.24).set_delay(float(count) * 0.016)
+		tw.parallel().tween_property(panel, "rotation", 0.0, 0.24).set_delay(float(count) * 0.016)
+		tw.parallel().tween_property(panel, "scale", Vector2(0.52, 0.52), 0.24).set_delay(float(count) * 0.016)
+		count += 1
+	if count > 0:
+		await get_tree().create_timer(0.24 + float(count - 1) * 0.016 + 0.03).timeout
+
+## UI 根：_build_ui() 里那个 CanvasLayer（名字 "UICanvas"）。
+## 碎片、全屏遮罩这类「要盖住所有面板」的节点都往它上面加 ——
+## ⚠ 注意 canvas 是 _build_ui 的**局部变量**，别的方法里取不到，必须按名字找。
+func _ui_canvas() -> CanvasLayer:
+	return get_node_or_null("UICanvas") as CanvasLayer
+
+
+## 「刷新手牌」用掉后的碎裂演出：背景碎裂，新的已刷新文字立即显示。
+## 保留按钮占位，避免结束回合按钮跳动；碎片仍从原位旋转落出屏幕。
+func _play_refresh_break_animation() -> void:
+	var cv := _ui_canvas()
+	if cv == null:
+		return
+	var rect: Rect2 = refresh_btn.get_global_rect()
+	var rng := RandomNumberGenerator.new()
+	rng.randomize()
+	for i in 9:
+		var shard := ColorRect.new()
+		# 配色跟新 UI 的蓝色按钮同色系（见 UiSkin.SHARD_COLORS）。原来是木板棕黄，
+		# 0.1.33 整套界面换成 16bit 蓝皮之后，这些碎片看着像别的 UI 掉下来的渣。
+		shard.color = UiSkin.SHARD_COLORS[i % UiSkin.SHARD_COLORS.size()]
+		shard.size = Vector2(rng.randf_range(9.0, 24.0), rng.randf_range(5.0, 13.0))
+		shard.position = rect.position + Vector2(
+			rng.randf() * maxf(1.0, rect.size.x - shard.size.x),
+			rng.randf() * maxf(1.0, rect.size.y - shard.size.y))
+		shard.rotation = rng.randf_range(-0.5, 0.5)
+		shard.pivot_offset = shard.size * 0.5
+		shard.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		cv.add_child(shard)
+		var tw := Motion.tween(shard, "linear")
+		tw.set_parallel(true)
+		Motion.curve(tw, "power1.in")
+		var land := Vector2(shard.position.x + rng.randf_range(-46.0, 46.0), 780.0)
+		var duration := rng.randf_range(0.55, 0.95)
+		var delay := rng.randf_range(0.0, 0.14)
+		tw.tween_property(shard, "position", land, duration).set_delay(delay)
+		tw.tween_property(shard, "rotation", shard.rotation + rng.randf_range(-3.2, 3.2), 0.9)
+		tw.tween_property(shard, "modulate:a", 0.0, 0.55).set_delay(0.4)
+		tw.chain().tween_interval(1.4 - maxf(duration + delay, 0.95))
+		tw.chain().tween_callback(shard.queue_free)
+	refresh_btn.modulate.a = 1.0 # Keep the new text readable after its background shatters.
+
+
+## 打开紧急调度的选牌面板
+func _open_dispatch_panel() -> void:
+	if _current_phase != "allocate" or _score_animating or _sort_animating:
+		return
+	if not GameState.can_dispatch():
+		return
+	if dispatch_panel == null:
+		_build_dispatch_panel()
+	dispatch_panel.visible = true
+	MotionScroll.reset_to_top(dispatch_scroll)
+	_deck_gyro_view = null          # 悬停态是从牌库那边借来的，开面板前先清干净
+	# 与牌库同一个做法：把其余 HUD 面板整体收出屏幕，让选牌这一屏是全屏的。
+	# _slide_main_ui 的控件清单里本来就有 left/right_panel / event_label / hand_panel /
+	# bottom_right / deck_root / tier_lever，所以不用另配一套。
+	_slide_main_ui(true)
+	if dispatch_hint != null:
+		dispatch_hint.text = _dispatch_hint_text()
+	_fill_dispatch_grid()
+
+
+## 面板显示实际调度费；专用牌面不显示普通牌的定价。
+func _dispatch_hint_text() -> String:
+	return "按「有效政策投入」档结算"
+
+
+func _close_dispatch_panel() -> void:
+	# 本来就没开 → 直接返回：_enter_allocate() 每回合都会调一次这里，
+	# 不设这个守卫的话会白白推一轮「滑回原位」的动画（虽然视觉上没差，但白建 7 条 tween）。
+	if dispatch_panel == null or not dispatch_panel.visible:
+		return
+	dispatch_panel.visible = false
+	_deck_gyro_view = null          # 别把悬停引用留在已隐藏的卡上
+	_slide_main_ui(false)
+
+
+## 请卡面板 —— **直接照搬牌库查看器的 UI 与交互**：同一套
+## 原始卡面子树共用透视材质 + 悬停黄框/浮起/陀螺仪，
+## 连悬停处理器都是同一个（_on_viewer_card_hover）。差别只有两处：
+##   ① 卡池限定为「当季可抽池」（不是全部 44 张）
+##   ② 点一下 = **调度它**，而不是打开卡牌详情
+## 这样玩家不必学第二套交互。
+func _build_dispatch_panel() -> void:
+	var layer := CanvasLayer.new()
+	layer.name = "DispatchLayer"
+	layer.layer = 8
+	add_child(layer)
+
+	dispatch_panel = Control.new()
+	dispatch_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dispatch_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	dispatch_panel.visible = false
+	layer.add_child(dispatch_panel)
+
+	var dim := ColorRect.new()
+	dim.color = Color(0, 0, 0, 0.62)
+	dim.set_anchors_preset(Control.PRESET_FULL_RECT)
+	dispatch_panel.add_child(dim)
+
+	var box := VBoxContainer.new()
+	box.set_anchors_preset(Control.PRESET_FULL_RECT)
+	box.offset_left = 70
+	box.offset_right = -70
+	box.offset_top = 40
+	box.offset_bottom = -40
+	box.add_theme_constant_override("separation", 12)
+	dispatch_panel.add_child(box)
+
+	var title := _make_label("紧急调度 · 从当季政策选择一张牌", 28, Color(1, 0.9, 0.55))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	box.add_child(title)
+
+	dispatch_hint = _make_label("", 12, Color(0.86, 0.88, 0.90))
+	dispatch_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	dispatch_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	box.add_child(dispatch_hint)
+
+	var scroll := ScrollContainer.new()
+	dispatch_scroll = scroll
+	MotionScroll.attach(scroll)
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	box.add_child(scroll)
+
+	# 四周留内边距，免得顶行/左列卡在放大漂浮时被裁剪（与牌库同一处理）
+	var margin := MarginContainer.new()
+	margin.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_theme_constant_override("margin_top", 30)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	scroll.add_child(margin)
+
+	dispatch_grid = HFlowContainer.new()
+	dispatch_grid.add_theme_constant_override("h_separation", 14)
+	dispatch_grid.add_theme_constant_override("v_separation", 14)
+	dispatch_grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	margin.add_child(dispatch_grid)
+
+	var close := _make_button("取消", _close_dispatch_panel, 20)
+	close.custom_minimum_size = Vector2(0, 48)
+	box.add_child(close)
+
+
+## 铺当季可抽池的牌。排序与手牌/牌库共用同一个开关，所以三处顺序永远一致。
+func _fill_dispatch_grid() -> void:
+	for c in dispatch_grid.get_children():
+		dispatch_grid.remove_child(c)
+		c.queue_free()
+	var pool: Array = GameState.season_pool()
+	pool.sort_custom(func(a, b): return _card_dict_less(a, b, _deck_sort_by_category))
+	var views: Array = []
+	for card in pool:
+		var made := _make_card(card, GameState.DISPATCH_TIER, true)
+		var panel: PanelContainer = made["panel"]
+		var view := _make_gyro_card_view(panel)
+		view.set_meta("card", card)
+		view.tooltip_text = "%s
+
+调度后按「有效政策投入」档结算：%s" % [
+			str(card["desc"]), _tier_effects_text(card, GameState.DISPATCH_TIER)]
+		view.scale = Vector2(0.3, 0.3)
+		view.modulate.a = 0.0
+		view.mouse_entered.connect(_on_viewer_card_hover.bind(view, card))
+		view.mouse_exited.connect(_on_viewer_card_unhover.bind(view))
+		view.gui_input.connect(_on_dispatch_card_click.bind(view, card))
+		dispatch_grid.add_child(view)
+		views.append(view)
+	# 等一帧布局完成后逐张发牌（与牌库同一节奏，只是牌少、间隔收紧）
+	await get_tree().process_frame
+	MotionScroll.reset_to_top(dispatch_scroll)
+	for i in views.size():
+		var p: Control = views[i]
+		var tw := Motion.tween(p, "enter", "arrival")
+		tw.tween_property(p, "scale", Vector2.ONE, 0.28).set_delay(i * 0.02)
+		tw.parallel().tween_property(p, "modulate:a", 1.0, 0.18).set_delay(i * 0.02)
+
+
+## 调度面板点击后立即把牌放到桌面队列末尾；它与普通牌一样等「执行行动」再生效。
+func _on_dispatch_card_click(event: InputEvent, _view: Control, card: Dictionary) -> void:
+	if not (event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT):
+		return
+	if GameState.dispatch_card(str(card["id"])):
+		_close_dispatch_panel()
+		_sync_dispatched_stage_cards()
+		_update_hud()
+
+
+## 把已购买的紧急调度牌显示在桌面待打出队列中；效果延迟到本回合统一结算。
+func _sync_dispatched_stage_cards() -> void:
+	if GameState.dispatched_cards.is_empty():
+		return
+	for d in GameState.dispatched_cards:
+		var cid: String = str(d["card_id"])
+		var already_staged := false
+		for existing in card_infos:
+			if existing.get("dispatched", false) and str(existing["card_id"]) == cid:
+				already_staged = true
+				break
+		if already_staged:
+			continue
+		var card: Dictionary = GameState.card_by_id(cid)
+		if card.is_empty():
+			continue
+		var made: Dictionary = _make_card(card, str(d["tier"]), true)
+		var panel: PanelContainer = made["panel"]
+		panel.custom_minimum_size = Vector2(122.0, 165.0)
+		panel.size = Vector2(122.0, 165.0)
+		_bind_card_gyro(panel)
+		panel.pivot_offset = Vector2(61.0, 165.0)
+		panel.position = Vector2(card_box.size.x * 0.5 - 61.0, card_box.size.y - 168.0)
+		card_box.add_child(panel)
+		_apply_gold_frame(panel)
+		card_infos.append({
+			"panel": panel, "card_id": cid, "cost_label": made["cost_label"],
+			"base_pos": panel.position, "theta": 0.0, "radial": Vector2.UP,
+			"selected": true, "staged_by_drag": true, "stage_order": _next_stage_order(),
+			"stage_zone": "preview", "preview_left": STAGED_PREVIEW_SEC,
+			"shaking": false, "hovered": false, "tier": str(d["tier"]), "dispatched": true,
+		})
+	_layout_fan()
+	_update_selected_label()
+
+
+func _build_hand_panel(preserve_staged: bool = false) -> void:
+	# A new hand owns a fresh input lifecycle; don't leave a pointer capture on old panels.
+	_card_press_panel = null
+	_card_press_elapsed = 0.0
+	_card_dragging = false
+	_card_drag_index = -1
+	var staged_infos: Array = []
+	for info in card_infos:
+		if preserve_staged and (info.get("staged_by_drag", false) or info.get("dispatched", false)):
+			staged_infos.append(info)
+	for c in card_box.get_children():
+		var keep_panel := false
+		for staged in staged_infos:
+			if staged.get("panel") == c:
+				keep_panel = true
+				break
+		if not keep_panel:
+			c.queue_free()
+	card_infos = staged_infos
+	# 发牌就按当前排序模式排好。排序模式是全局的（与牌库共用），
+	# 所以新一局/新一回合发牌都沿用上一次的选择，不会又变回无序抽取的顺序。
+	# 比较器是全序（最后按 id 兜底），所以这里的结果与 _sort_hand_cards 的结果一致。
+	current_hand.sort_custom(func(a, b): return _card_dict_less(a, b, _deck_sort_by_category))
+	for card in current_hand:
+		var made := _make_card(card)
+		var panel: PanelContainer = made["panel"]
+		panel.pivot_offset = Vector2(61.0, 165.0)
+		_bind_card_gyro(panel)
+		card_box.add_child(panel)
+		card_infos.append({
+			"panel": panel, "card_id": card["id"],
+			"base_pos": Vector2.ZERO, "theta": 0.0, "radial": Vector2.UP,
+			"selected": false, "shaking": false, "hovered": false,
+			"tier": "",                                  # "" = 跟随拉杆；非空 = 选中时锁定的档位
+			"cost_label": made["cost_label"],
+		})
+	_refresh_hand_display()      # 用当前档位把牌面的价格填上（加成只在悬停提示里）
+	_layout_fan.call_deferred()
+	_sync_dispatched_stage_cards()
+	_update_hud()
+
+
+## 扇形摆放手牌：圆心在下方，牌绕圆心径向排列（牌底小弧、牌顶大弧）
+## 屏幕坐标 → card_box 的局部坐标。
+##
+## ⚠ 不要用 card_box.get_global_transform().affine_inverse()：容器布局尚未跑过时
+##   card_box.size 可能是 0（headless 下实测为 (0, 200)），变换矩阵会把 x 轴压成 0，
+##   反变换出来的落点是垃圾值 —— 表现是动画目标点乱跳、牌飞不到位。
+##   card_box 没有缩放/旋转，所以直接减 global_position 既正确又不受尺寸影响。
+func _screen_to_card_box(screen_pt: Vector2) -> Vector2:
+	return screen_pt - card_box.global_position
+
+
+func _layout_fan(animate_hand: bool = false) -> void:
+	var fan_infos: Array = []
+	var staged_infos: Array = []
+	for info in card_infos:
+		if info.get("staged_by_drag", false):
+			staged_infos.append(info)
+		else:
+			fan_infos.append(info)
+	staged_infos.sort_custom(func(a, b): return int(a.get("stage_order", 0)) < int(b.get("stage_order", 0)))
+	var n := fan_infos.size()
+	if n == 0:
+		_layout_staged_cards(staged_infos)
+		_fan_layout_size = card_box.size
+		if sandpan_view: sandpan_view.invalidate_layout()
+		return
+	var card_w := 122.0
+	var card_h := 165.0
+	var area_size := card_box.size
+	if area_size.x < 10.0:
+		area_size.x = 528.0
+
+	var step_dist := 66.0                      # 相邻牌在弧上的间距（越小重叠越多）
+	var delta_theta := deg_to_rad(8.5)
+	var radius: float = step_dist / delta_theta
+	var total_span := delta_theta * float(n - 1)
+
+	# 第一遍：以「圆心在原点」计算每张牌的角度与轴心点
+	var pivots: Array = []
+	var thetas: Array = []
+	for i in n:
+		var theta := -total_span / 2.0 + delta_theta * float(i)
+		pivots.append(Vector2(sin(theta), -cos(theta)) * radius)
+		thetas.append(theta)
+		var panel: PanelContainer = fan_infos[i]["panel"]
+		panel.size = Vector2(card_w, card_h)
+		panel.custom_minimum_size = Vector2(card_w, card_h)
+		panel.pivot_offset = Vector2(card_w / 2.0, card_h)
+		if not animate_hand and not fan_infos[i].get("dealing", false) and not fan_infos[i].get("returning", false):
+			panel.rotation = theta
+
+	# 第二遍：算出旋转后整体的真实包围盒（不依赖手算常数）
+	var corners := [
+		Vector2(-card_w / 2.0, -card_h), Vector2(card_w / 2.0, -card_h),
+		Vector2(card_w / 2.0, 0.0), Vector2(-card_w / 2.0, 0.0),
+	]
+	var min_x := INF
+	var max_x := -INF
+	var min_y := INF
+	var max_y := -INF
+	for i in n:
+		for c in corners:
+			var p: Vector2 = pivots[i] + c.rotated(thetas[i])
+			min_x = minf(min_x, p.x)
+			max_x = maxf(max_x, p.x)
+			min_y = minf(min_y, p.y)
+			max_y = maxf(max_y, p.y)
+
+	# 第三遍：整体平移 —— 水平居中于容器，底部贴边（留下上方空间供悬停弹起）
+	var bottom_margin := 4.0
+	var dx: float = area_size.x / 2.0 - (min_x + max_x) / 2.0
+	var dy: float = (area_size.y - bottom_margin) - max_y
+	for i in n:
+		var panel: PanelContainer = fan_infos[i]["panel"]
+		var target: Vector2 = pivots[i] + Vector2(dx, dy) - panel.pivot_offset
+		fan_infos[i]["base_pos"] = target
+		fan_infos[i]["theta"] = thetas[i]
+		fan_infos[i]["radial"] = Vector2(sin(thetas[i]), -cos(thetas[i]))
+		if fan_infos[i].get("dealing", false) or fan_infos[i].get("returning", false):
+			continue # The arrival callback uses the latest layout after a resize.
+		if animate_hand:
+			# Retarget from the current pose, preserving spring momentum even when
+			# another card leaves or returns before the previous reflow has settled.
+			var raised: bool = fan_infos[i].get("hovered", false) or fan_infos[i]["selected"]
+			var goal: Vector2 = target + fan_infos[i]["radial"] * (CARD_RAISE if raised else 0.0)
+			MotionSpring.to(panel, "position", goal, 430.0, 32.0)
+			MotionSpring.to(panel, "rotation", thetas[i], 460.0, 34.0)
+		else:
+			panel.position = target
+	_layout_staged_cards(staged_infos)
+	_fan_layout_size = area_size
+	if sandpan_view: sandpan_view.invalidate_layout()
+	# Defer once so container layout and dispatch synchronization settle first.
+	if play_deal_anim:
+		play_deal_anim = false
+		_play_deal_animation.call_deferred()
+
+
+func _build_staged_board(canvas: CanvasLayer) -> void:
+	staged_board = NinePatchRect.new()
+	staged_board.name = "StagedWoodenBoard"
+	var atlas := AtlasTexture.new()
+	atlas.atlas = preload("res://assets/ui/wooden_gui_32x32.png")
+	atlas.region = Rect2(448, 640, 96, 96)
+	staged_board.texture = atlas
+	staged_board.patch_margin_left = 12
+	staged_board.patch_margin_right = 12
+	staged_board.patch_margin_top = 12
+	staged_board.patch_margin_bottom = 12
+	staged_board.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	staged_board.anchor_left = 1.0
+	staged_board.anchor_right = 1.0
+	staged_board.offset_left = -562
+	staged_board.offset_right = -222
+	staged_board.offset_top = 18
+	staged_board.offset_bottom = 142
+	staged_board.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	canvas.add_child(staged_board)
+	_ui_slide_origin[staged_board] = [-562.0, 18.0, -222.0, 142.0]
+	staged_board_count = _make_label("待执行", 12, Color("f0d7ab"))
+	staged_board_count.position = Vector2(18, 9)
+	staged_board_count.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	staged_board.add_child(staged_board_count)
+	staged_board.hide()
+
+
+func _layout_staged_cards(staged_infos: Array) -> void:
+	if card_box == null: return
+	if sandpan_view and sandpan_view.board_cards_attached: return
+	var board_infos: Array = []
+	var preview_infos: Array = []
+	for info in staged_infos:
+		if info.get("stage_zone", "preview") == "board": board_infos.append(info)
+		else: preview_infos.append(info)
+	for row in [preview_infos, board_infos]:
+		var docked: bool = row == board_infos
+		for i in row.size():
+			var info: Dictionary = row[i]
+			var panel: PanelContainer = info["panel"]
+			# A drag preview reserves a slot for neighbours only. The held card
+			# keeps its canonical hand position until release actually commits it.
+			if _card_dragging and panel == _card_press_panel:
+				panel.z_index = 1000
+				continue
+			var s := BOARD_CARD_SCALE if docked else 1.0
+			var spacing := BOARD_CARD_SPACING if docked else STAGED_CARD_SPACING
+			var center := Vector2(card_box.size.x * 0.5, -115.5)
+			if docked: center = _screen_to_card_box(staged_board.get_global_rect().position + Vector2(staged_board.size.x * 0.5, 66.0))
+			center.x += (float(i) - float(row.size() - 1) * 0.5) * spacing
+			var target := center - panel.pivot_offset - (panel.size * 0.5 - panel.pivot_offset) * s
+			info["base_pos"] = target
+			info["theta"] = 0.0
+			info["radial"] = Vector2.UP
+			if info.get("queue_flying", false):
+				var flight := panel.get_node_or_null("CardFlight")
+				if flight: flight.target_position = target
+				continue
+			if _score_animating or info.get("flying", false): continue
+			Motion.cancel(panel, "deal")
+			panel.modulate.a = 1.0
+			panel.z_index = 100 + int(info.get("stage_order", i))
+			MotionSpring.to(panel, "rotation", 0.0, 460.0, 34.0)
+			MotionSpring.to(panel, "scale", Vector2(s, s), 430.0, 32.0)
+			MotionSpring.to(panel, "position", target, 440.0, 32.0)
+	if staged_board_count:
+		var count := _ordered_staged_indices().size()
+		staged_board_count.text = "待执行"
+
+
+func _process_staged_cards(delta: float) -> void:
+	if staged_board:
+		staged_board.visible = _playing and hand_panel.visible and _current_phase == "allocate"
+	if _current_phase != "allocate" or _score_animating or _sort_animating or _deck_open \
+		or not hand_panel.visible or (sandpan_view and sandpan_view.collapsed) \
+		or (dispatch_panel and dispatch_panel.visible) or popup_root.visible or crisis_root.visible:
+		return
+	var docking: Array = []
+	for info in card_infos:
+		if not info.get("staged_by_drag", false) or info.get("stage_zone", "preview") != "preview" \
+			or info.get("dragging", false) or info.get("flying", false) or info["panel"] == _card_press_panel: continue
+		info["preview_left"] = maxf(0.0, float(info.get("preview_left", STAGED_PREVIEW_SEC)) - delta)
+		if info["preview_left"] <= 0.0:
+			info["stage_zone"] = "board"
+			info["queue_flying"] = true
+			info["flying"] = true
+			docking.append(info)
+	if docking.is_empty(): return
+	_layout_fan(true)
+	for info in docking:
+		_fly_queue_card(info, Vector2(BOARD_CARD_SCALE, BOARD_CARD_SCALE), 0.0, 0.58, 92.0)
+
+
+func _fly_queue_card(info: Dictionary, goal_scale: Vector2, angle: float, duration: float, arc: float) -> void:
+	var panel: PanelContainer = info["panel"]
+	for key in ["position", "scale", "rotation"]: MotionSpring.stop(panel, key)
+	Motion.cancel(panel, "deal")
+	info["queue_flying"] = true
+	info["flying"] = true
+	panel.z_index = 900
+	_step_card_gyro(panel, Vector2.ZERO, 1.0)
+	CardFlight.play(panel, info["base_pos"], goal_scale, angle, duration, arc, _finish_queue_flight.bind(info, panel))
+
+
+func _finish_queue_flight(info: Dictionary, panel: PanelContainer) -> void:
+	_metric_preview_dirty = true
+	if not is_instance_valid(panel): return
+	info["queue_flying"] = false
+	info["returning"] = false
+	info["flying"] = false
+	panel.z_index = 100 + int(info.get("stage_order", 0)) if info.get("staged_by_drag", false) else 0
+	_step_card_gyro(panel, Vector2.ZERO, 1.0)
+	_update_execute_button()
+
+
+## Balatro-style deal: leave the visible stack, rotate and spread into the fan.
+func _play_deal_animation() -> void:
+	if _score_animating or _current_phase != "allocate": return
+	var vp := get_viewport().get_visible_rect().size
+	var source := Vector2(vp.x - 160.0, minf(379.0, vp.y * 0.55))
+	if not deck_backs.is_empty() and is_instance_valid(deck_backs.back()):
+		var back: Control = deck_backs.back()
+		source = back.get_global_transform() * (back.size * 0.5)
+	source.x = clampf(source.x, 32.0, vp.x - 32.0)
+	source.y = clampf(source.y, 32.0, vp.y - 32.0)
+	var deal_index := 0
+	for i in card_infos.size():
+		var info: Dictionary = card_infos[i]
+		if info.get("staged_by_drag", false):
+			continue
+		var panel: PanelContainer = info["panel"]
+		if not is_instance_valid(panel): continue
+		var target: Vector2 = info["base_pos"]
+		if wetland and wetland.reduced_motion:
+			panel.position = target
+			panel.rotation = info["theta"]
+			panel.scale = Vector2.ONE
+			panel.modulate.a = 1.0
+			continue
+		for key in ["position", "rotation", "scale"]: MotionSpring.stop(panel, key)
+		info["dealing"] = true
+		info["flying"] = true
+		panel.set_meta("deal_source", source)
+		panel.set_meta("deal_index", deal_index)
+		panel.scale = Vector2(0.52, 0.52)
+		panel.position = _screen_to_card_box(source) - panel.pivot_offset + (panel.pivot_offset - panel.size * 0.5) * 0.52
+		panel.rotation = -0.10
+		panel.modulate.a = 0.0
+		var tw := Motion.tween(panel, "linear", "deal")
+		tw.tween_interval(float(deal_index) * INITIAL_DEAL_STAGGER)
+		Motion.curve(tw, "power2.inOut")
+		tw.tween_property(panel, "position", target, INITIAL_DEAL_DURATION)
+		tw.parallel().tween_property(panel, "rotation", float(info["theta"]), INITIAL_DEAL_DURATION)
+		tw.parallel().tween_property(panel, "scale", Vector2.ONE, INITIAL_DEAL_DURATION)
+		tw.parallel().tween_property(panel, "modulate:a", 1.0, 0.045)
+		tw.tween_callback(_finish_card_deal.bind(info, panel))
+		deal_index += 1
+	if deal_index > 0 and _deal_sfx_turn != GameState.turn:
+		_deal_sfx_turn = GameState.turn
+		_play_deal_sfx(deal_index, INITIAL_DEAL_DURATION + float(DEAL_SFX_FULL_HAND - 1) * INITIAL_DEAL_STAGGER)
+
+## 当前 7 张牌的试听长度作为上限，按实际飞回手里的牌数 / 7 缩短。
+func _play_deal_sfx(card_count: int, full_hand_duration: float) -> void:
+	_stop_deal_sfx()
+	if card_count <= 0 or full_hand_duration <= 0.0 or not _sfx_streams.has("deal"):
+		return
+	var card_ratio := clampf(float(card_count) / DEAL_SFX_FULL_HAND, 0.0, 1.0)
+	var audio_duration := full_hand_duration * DEAL_SFX_DURATION_RATIO * card_ratio
+	_deal_sfx_player.stream = _sfx_streams["deal"]
+	_deal_sfx_player.pitch_scale = _deal_sfx_player.stream.get_length() / audio_duration
+	_deal_sfx_player.volume_db = _volume_db(bgm_volume, DEAL_SFX_DB)
+	_deal_sfx_player.play()
+	var tw := Motion.tween(self, "linear", "deal_audio")
+	tw.tween_interval(audio_duration)
+	tw.tween_callback(_deal_sfx_player.stop)
+
+func _stop_deal_sfx() -> void:
+	Motion.cancel(self, "deal_audio")
+	if is_instance_valid(_deal_sfx_player):
+		_deal_sfx_player.stop()
+
+
+func _finish_card_deal(info: Dictionary, panel: PanelContainer) -> void:
+	if not is_instance_valid(panel) or not info.get("dealing", false): return
+	info["dealing"] = false
+	info["flying"] = false
+	panel.position = info["base_pos"]
+	panel.rotation = info["theta"]
+	panel.scale = Vector2.ONE
+	panel.modulate.a = 1.0
+	_step_card_gyro(panel, Vector2.ZERO, 1.0)
+
+## 容器尺寸变化时重排（确保扇形始终居中）
+func _on_card_box_resized() -> void:
+	if not _score_animating and not _card_dragging and not card_infos.is_empty():
+		_layout_fan()
+
+
+# ==================== 出牌档位拉杆 ====================
+# 拉杆的三个档位，顺序 = 从左到右
+const LEVER_TIERS := ["basic", "effective", "deep"]
+# 档位 → 状态文字。半价/全价/双倍价是 0.0.4 定价规则里**明确要给玩家**的那句话，
+# 属于规则而非隐性参数，可以上屏（难度负向倍率那类才不许写）。
+const LEVER_STATE_TEXT := {
+	"basic": "基础政策投入 · 半价",
+	"effective": "有效政策投入 · 全价",
+	"deep": "深度政策投入 · 双倍价",
+}
+## 用户提供的卷轴与印章，只给当前档位盖章。
+func _build_tier_lever(holder: Node) -> void:
+	tier_lever = PanelContainer.new()
+	tier_lever.anchor_top = 1.0
+	tier_lever.anchor_bottom = 1.0
+	tier_lever.offset_left = 14
+	tier_lever.offset_right = 266
+	tier_lever.offset_top = -203
+	tier_lever.offset_bottom = -14
+	tier_lever.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+	tier_lever.visible = false
+	holder.add_child(tier_lever)
+	lever_track = PolicyStampSelector.new()
+	lever_track.custom_minimum_size = Vector2(252, 189)
+	tier_lever.add_child(lever_track)
+	lever_handle = lever_track
+	lever_track.tier_requested.connect(_on_policy_stamp_requested)
+	lever_track.stamp_landed.connect(_on_policy_stamp_landed)
+	lever_cd_label = _make_label("", 12, Color("ffd6a4"))
+	lever_cd_label.position = Vector2(160, 0)
+	lever_cd_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	lever_track.add_child(lever_cd_label)
+	_refresh_lever_visuals(false)
+
+func _on_policy_stamp_requested(tier: String) -> void:
+	if _allocation_controls_locked() or _paused: return
+	var old_tier := play_tier
+	var animate: bool = not (wetland and wetland.reduced_motion)
+	_set_play_tier(tier, animate)
+	if not animate and old_tier != play_tier: _on_policy_stamp_landed()
+
+func _on_policy_stamp_landed() -> void:
+	if _allocation_controls_locked() or _paused: return
+	play_sfx("stamp", 1.0, -3.0)
+
+func _place_lever_handle(animate: bool) -> void:
+	lever_handle.snap_to_tier(maxi(0, LEVER_TIERS.find(play_tier)), animate)
+
+
+## 切档：更新手柄姿态、刻度/标签高亮、状态文字，并刷新手牌上还没被选中的牌。
+## 冷却期间**拉杆锁死**、直接吞掉输入；点当前档不算切档，也不会重置冷却。
+func _set_play_tier(tier: String, animate: bool = true) -> void:
+	if _score_animating: return
+	if not GameState.TIER_COST_MULT.has(tier):
+		return
+	if Time.get_ticks_msec() - _lever_cooldown_ms < LEVER_COOLDOWN_MS:
+		return                                   # 冷却中：锁死
+	if tier == play_tier:
+		return                                   # 点的是当前档：不做任何事
+	play_tier = tier
+	_lever_cooldown_ms = Time.get_ticks_msec()
+	_refresh_lever_visuals(animate)
+	_refresh_hand_display()
+
+
+## 出牌档位的冷却倒计时：冷却时拉杆变暗（看着就知道点不动），
+## 并在「出牌档位」右边显示还剩几秒。由 _process 每帧调用 ——
+## 所以只改文本与 modulate，绝不重建节点（与排序冷却同一套写法）。
+func _update_lever_cooldown() -> void:
+	if lever_cd_label == null:
+		return
+	var remaining := LEVER_COOLDOWN_MS - (Time.get_ticks_msec() - _lever_cooldown_ms)
+	var phase_locked := _allocation_controls_locked()
+	var locked: bool = phase_locked or remaining > 0
+	if remaining > 0 and not phase_locked:
+		lever_cd_label.text = "冷却 %.1f 秒" % (float(remaining) / 1000.0)
+	elif lever_cd_label.text != "":
+		lever_cd_label.text = ""
+	if lever_track != null:
+		lever_track.set_locked(locked)
+
+
+func _refresh_lever_visuals(animate: bool) -> void:
+	if tier_lever == null:
+		return
+	var idx: int = maxi(0, LEVER_TIERS.find(play_tier))
+	for node in lever_slot_btns:
+		var i: int = int(node.get_meta("lever_tier_index", 0))
+		var active: bool = i == idx
+		if node is ColorRect:
+			node.color = Color(1.0, 0.86, 0.42) if active else Color(0.55, 0.45, 0.33)
+		else:
+			node.add_theme_color_override("font_color",
+				Color(1.0, 0.94, 0.66) if active else Color(0.60, 0.55, 0.47))
+	if lever_state_label != null:
+		lever_state_label.text = str(LEVER_STATE_TEXT.get(play_tier, ""))
+	if lever_handle != null:
+		_place_lever_handle(animate)
+
+
+## 建一张卡（手牌 / 牌库网格 / 详情大图共用）。
+## 返回 {panel, cost_label}；牌面按 tier 先填一遍，
+## tier 传空则用当前拉杆档位。手牌那边之后还会由 _update_card_face() 反复重填。
+func _make_card(card: Dictionary, tier: String = "", dispatched: bool = false) -> Dictionary:
+	var panel := PanelContainer.new()
+	panel.set_script(preload("res://scripts/card_hit_panel.gd"))
+	panel.custom_minimum_size = Vector2(122, 165)
+	panel.size = Vector2(122, 165)
+	panel.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	panel.add_theme_stylebox_override("panel", VisualTheme.card_style())
+	panel.gui_input.connect(_on_card_gui_input.bind(panel))
+	var use_tier: String = tier if tier != "" else play_tier
+	if not card["tiers"].has(use_tier):
+		use_tier = "effective"
+	var cost: int = GameState.tier_cost(str(card["id"]), use_tier)
+	PixelCardArt.add_face(panel, str(card["name"]), str(cost), false, str(card["category"]))
+	panel.set_meta("dispatched", dispatched)
+	if dispatched:
+		panel.get_meta("pixel_face").texture = PixelCardArt.dispatch_texture(card)
+		panel.get_meta("pixel_face").set_meta("shadow_silhouette", "dispatch/" + str(card["category"]) + "/" + str(panel.get_meta("pixel_face").texture.get_size()))
+	# Preserve the existing price-state interface; this Label never draws the card text.
+	var cost_l := Label.new()
+	cost_l.name = "PriceState"
+	cost_l.visible = false
+	cost_l.text = str(cost)
+	panel.add_child(cost_l)
+	panel.tooltip_text = "%s\n\n%s(%d 万)：%s" % [card["desc"], GameState.TIER_NAMES[use_tier],
+		cost, _tier_effects_text(card, use_tier)]
+	if dispatched:
+		cost_l.text = "调度"
+		panel.tooltip_text = "%s
+
+紧急调度 · 有效政策投入：%s" % [card["desc"], _tier_effects_text(card, use_tier)]
+	return {"panel": panel, "cost_label": cost_l}
+
+
+## 由卡 id 取中文名
+func _card_name(card_id: String) -> String:
+	for c in GameState.ACTION_CARDS:
+		if c["id"] == card_id:
+			return c["name"]
+	return card_id
+
+
+## 由 id 取卡牌字典（刷新牌面要用）
+func _card_dict(card_id: String) -> Dictionary:
+	for c in GameState.ACTION_CARDS:
+		if str(c["id"]) == card_id:
+			return c
+	return {}
+
+
+## 某一档的效果文字：「水质 +3、沉水植被 +6（2 回合后）」
+func _tier_effects_text(card: Dictionary, tier: String) -> String:
+	var t: Dictionary = card["tiers"].get(tier, card["tiers"]["effective"])
+	var parts: Array = []
+	for e in t["effects"]:
+		var d: int = int(e["delay"])
+		var suffix := "(%d 回合后)" % d if d > 0 else ""
+		parts.append("%s %+d%s" % [GameState.METRIC_NAMES[e["metric"]], int(e["delta"]), suffix])
+	return "、".join(parts)
+
+
+func _effect_text(card: Dictionary) -> String:
+	return "效果：" + _tier_effects_text(card, play_tier)
+
+
+## 这张牌锁定在哪一档：**已选中的牌用它自己被记下的档位**（选完再拨拉杆也不变），
+## 没选中的牌跟随拉杆当前档位。
+func _info_tier(info: Dictionary) -> String:
+	var t: String = str(info.get("tier", ""))
+	return t if t != "" else play_tier
+
+
+## 刷新一张牌的牌面：价格（含档位标签）+ 悬停提示里的「这一档」加成
+func _update_card_face(info: Dictionary) -> void:
+	var card := _card_dict(str(info["card_id"]))
+	if card.is_empty():
+		return
+	var tier: String = _info_tier(info)
+	var cost: int = GameState.tier_cost(str(info["card_id"]), tier)
+	var locked: bool = str(info.get("tier", "")) != ""
+	var tag: String = ("%s " % str(GameState.TIER_NAMES[tier]).substr(0, 2)) if locked else ""
+	var cost_l: Label = info["cost_label"]
+	cost_l.text = "%s%d" % [tag, cost]
+	var face: TextureRect = info["panel"].get_meta("pixel_face")
+	if bool(info.get("dispatched", false)):
+		cost_l.text = "调度"
+		face.texture = PixelCardArt.dispatch_texture(card)
+		face.set_meta("shadow_silhouette", "dispatch/" + str(card["category"]) + "/" + str(face.texture.get_size()))
+	else:
+		face.texture = PixelCardArt.texture(str(card["name"]), str(cost), str(card["category"]))
+		face.set_meta("shadow_silhouette", "action/" + str(card["category"]) + "/" + str(face.texture.get_size()))
+	# 锁定的牌用更亮的金色，一眼看出「这张是按哪个档锁住的」
+	cost_l.add_theme_color_override("font_color",
+		Color("956523") if locked else Color("6f542a"))
+	info["panel"].tooltip_text = "%s\n\n%s(%d 万)：%s" % [
+		card["desc"], GameState.TIER_NAMES[tier], cost, _tier_effects_text(card, tier)]
+	if bool(info.get("dispatched", false)):
+		info["panel"].tooltip_text = "%s
+
+紧急调度 · 有效政策投入：%s" % [card["desc"], _tier_effects_text(card, tier)]
+
+
+## 拉杆一动就把**还没选中**的牌全部刷新；已选中的保持锁定档位不动
+func _refresh_hand_display() -> void:
+	for info in card_infos:
+		_update_card_face(info)
+
+
+func _find_card_info(panel: PanelContainer) -> Dictionary:
+	for info in card_infos:
+		if info["panel"] == panel:
+			return info
+	return {}
+
+
+## 按下后移动/长按进入拖拽；短点击不再选择卡牌。
+func _on_card_gui_input(event: InputEvent, panel: PanelContainer) -> void:
+	if _score_animating or _sort_animating:
+		return      # 算分动画 / 手牌换位进行中，牌正在飞，不接受选中切换
+	if sandpan_view and (sandpan_view.collapsed or sandpan_view.board_cards_attached): return
+	if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		if _card_press_panel != null:
+			return
+		_card_press_panel = panel
+		_card_press_origin = panel.get_global_transform() * event.position
+		_card_press_elapsed = 0.0
+
+
+func _card_selection_error(info: Dictionary) -> String:
+	if info.is_empty():
+		return "无法识别这张牌"
+	if _ordered_staged_indices().size() >= BOARD_CAPACITY:
+		return "小牌桌已满(最多 5 张)"
+	if info.get("dispatched", false): return ""
+	var slots := GameState.action_slots()
+	if _selected_count() >= slots:
+		return "行动位已满(本难度每回合最多 %d 个)" % slots
+	var cost := GameState.tier_cost(info["card_id"], play_tier)
+	if _committed_funds() + cost > GameState.funds:
+		return "资金不足(还需 %d 万，可用 %d 万)" % [cost, GameState.funds - _committed_funds()]
+	return ""
+
+
+## 已选卡牌的总花费（万）
+func _committed_funds() -> int:
+	var total := 0
+	for info in card_infos:
+		if info["selected"] and not info.get("dispatched", false) and not info.get("budget_executed", false):
+			# 调度牌已经单独付款，不重复占用回合资金预算。
+			total += GameState.tier_cost(info["card_id"], _info_tier(info))
+	return total
+
+
+func _selected_count() -> int:
+	var n := 0
+	for info in card_infos:
+		if info["selected"] and not info.get("dispatched", false):
+			n += 1
+	return n
+
+
+func _update_selected_label() -> void:
+	_metric_preview_dirty = true
+	if selected_label != null:
+		selected_label.text = ""
+		selected_label.visible = false
+	_update_turn_budget_label()
+	_update_execute_button()
+	_refresh_action_buttons()
+
+
+func _update_metric_preview() -> void:
+	var active := _playing and _current_phase == "allocate" and not _score_animating
+	if not active:
+		_metric_preview_dirty = true
+		if _metric_preview_values.is_empty(): return
+		_metric_preview_values.clear()
+		for metric in metric_bars:
+			if metric == "birds":
+				metric_bars[metric]["bird_segments"].clear_forecast()
+				var live_birds: Dictionary = GameState.bird_snapshot()
+				metric_bars[metric]["reference_label"].text = "留湖 %d · 迁徙 %d · 生态红线 %d" % [live_birds["base"], live_birds["migrants"], GameState.failure_threshold_for("birds")]
+				metric_bars[metric]["reference_label"].tooltip_text = "实白为固有鸟群，半透明为迁徙鸟群。"
+				metric_bars[metric]["val"].add_theme_color_override("font_color", METRIC_COLORS[metric])
+				if not _score_animating: metric_bars[metric]["val"].text = str(GameState.metrics[metric])
+			else: metric_bars[metric]["preview"].configure(0.0, 0.0)
+			metric_bars[metric]["val"].tooltip_text = ""
+		return
+	if not _metric_preview_dirty: return
+	_metric_preview_dirty = false
+	var queue: Array = []
+	for index in _ordered_staged_indices():
+		var info: Dictionary = card_infos[index]
+		if info.get("stage_zone", "preview") != "board" or info.get("queue_flying", false): continue
+		queue.append({"card_id": info["card_id"], "tier": _info_tier(info), "dispatched": info.get("dispatched", false)})
+	var forecast: Dictionary = GameState.preview_settlement_detail(queue)
+	_metric_preview_values = forecast["metrics"]
+	for metric in metric_bars:
+		var current := float(GameState.metrics[metric])
+		var predicted := float(_metric_preview_values.get(metric, current))
+		if metric == "birds":
+			metric_bars[metric]["bird_segments"].configure_forecast(int(forecast["birds"]["base"]), int(forecast["birds"]["migrants"]))
+			# Labels use logical snapshots rather than intermediate animation values.
+			var shown_birds: Dictionary = GameState.bird_snapshot() if predicted > current else forecast["birds"]
+			metric_bars[metric]["reference_label"].text = "留湖 %d · 迁徙 %d · 生态红线 %d" % [shown_birds["base"], shown_birds["migrants"], GameState.failure_threshold_for("birds")]
+			metric_bars[metric]["val"].text = "%d → %d" % [int(current), int(predicted)] if current != predicted else str(int(current))
+			metric_bars[metric]["val"].add_theme_color_override("font_color", Color("ef5350") if predicted < current else METRIC_COLORS[metric])
+		else:
+			metric_bars[metric]["preview"].configure(current, predicted)
+		metric_bars[metric]["val"].tooltip_text = "结算预览：%d → %d(%+d)\n含本回合到期的遗留效果、协同、自然变化、六值联动与已预警危机；与实际结算共用本回合水位结果。" % [int(current), int(predicted), int(predicted - current)]
+		if metric == "birds":
+			metric_bars[metric]["val"].tooltip_text += "\n留湖 %d、迁徙 %d → 留湖 %d、迁徙 %d；生态红线 %d，按总量判负。" % [GameState.bird_snapshot()["base"], GameState.bird_snapshot()["migrants"], forecast["birds"]["base"], forecast["birds"]["migrants"], GameState.failure_threshold_for("birds")]
+			if int(forecast["food_loss"]) > 0:
+				metric_bars[metric]["val"].tooltip_text += "\n候鸟食物损失 %d，持续至本年冬末，可用修复牌恢复。" % int(forecast["food_loss"])
+			if GameState.current_season() == "winter" and int(forecast["birds"]["loss"]) > 0:
+				metric_bars[metric]["val"].tooltip_text += "\n次年迁入遗留预计 %d(冬季口径)。" % mini(20, ceili(int(forecast["birds"]["loss"]) * 0.5))
+			var bird_delta_hint := "从左到右：实心固有鸟群、半透明迁徙鸟群、闪烁变化段。\n增加时：当前鸟群后接白色增加段。\n减少时：减少后的鸟群后接红色减少段。\n最右端为圆弧，总量不变时没有变化段，生态红线固定。\n固有 %+d，迁徙 %+d，总量 %+d。" % [int(forecast["birds"]["base"]) - int(GameState.bird_snapshot()["base"]), int(forecast["birds"]["migrants"]) - int(GameState.bird_snapshot()["migrants"]), int(predicted - current)]
+			metric_bars[metric]["reference_label"].tooltip_text = ("⚠ 预览：候鸟总量将跌破生态红线\n" if int(forecast["birds"]["total"]) < GameState.failure_threshold_for("birds") else "") + bird_delta_hint
+		if metric == "water_level" and int(forecast["water_legacy"]) != 0:
+			metric_bars[metric]["val"].tooltip_text += "\n秋季开局水位遗留 %+d，当季预览不重复扣除。" % int(forecast["water_legacy"])
+
+
+func _cards_waiting_for_board() -> bool:
+	for info in card_infos:
+		if info.get("staged_by_drag", false) and (info.get("stage_zone", "preview") != "board" or info.get("queue_flying", false) or info.get("dragging", false)):
+			return true
+	return false
+
+
+func _update_execute_button() -> void:
+	if end_turn_btn == null: return
+	var waiting := _cards_waiting_for_board()
+	end_turn_btn.disabled = waiting or _score_animating or _sort_animating
+	end_turn_btn.tooltip_text = "等待所有已打出的牌落到待执行区" if waiting else ""
+
+
+func _update_turn_budget_label() -> void:
+	if funds_label == null:
+		return
+	var pending := _committed_funds() if _current_phase == "allocate" else 0
+	var card_cost := GameState.turn_card_spent + pending
+	var committed := card_cost + GameState.turn_other_spent
+	funds_label.text = "%d / %d 万" % [committed, GameState.turn_budget]
+	funds_label.tooltip_text = "本回合已用及待付 / 本回合总预算\n行动与调度：%d 万\n刷新手牌：%d 万\n剩余预算：%d 万" % [card_cost, GameState.turn_other_spent, GameState.turn_budget - committed]
+
+
+## 拒绝选中：红框提示 + 弹簧受力回摆 + 提示原因
+func _reject_card(panel: PanelContainer, reason: String) -> void:
+	var info: Dictionary = _find_card_info(panel)
+	if info.is_empty() or info.get("shaking", false):
+		return
+	info["shaking"] = true
+	# The impulse owns the card pose until it settles; stop hover springs to avoid two drivers fighting.
+	MotionSpring.stop(panel, "position")
+	MotionSpring.stop(panel, "rotation")
+	MotionSpring.stop(panel, "scale")
+	var sb := panel.get_theme_stylebox("panel")
+	var old_border := Color.WHITE
+	if sb is StyleBoxFlat:
+		old_border = sb.border_color
+		sb.border_color = Color(0.92, 0.26, 0.22)
+	var impact := preload("res://scripts/motion_impact.gd").new()
+	impact.direction = -1.0 if get_viewport().get_mouse_position().x >= panel.get_global_rect().get_center().x else 1.0
+	impact.finished.connect(func() -> void:
+		if is_instance_valid(sb):
+			sb.border_color = old_border
+		info["shaking"] = false)
+	impact.finished.connect(func() -> void:
+		if not is_instance_valid(panel) or _find_card_info(panel).is_empty() or _score_animating: return
+		MotionSpring.to(panel, "position", info["base_pos"], 430.0, 32.0)
+		MotionSpring.to(panel, "rotation", float(info["theta"]), 460.0, 34.0)
+		MotionSpring.to(panel, "scale", Vector2.ONE, 390.0, 30.0))
+	panel.add_child(impact)
+	_flash_hint(reason)
+
+
+## 顶部提示条短暂显示（红字），随后恢复
+func _flash_hint(text: String) -> void:
+	selected_label.visible = true
+	selected_label.add_theme_color_override("font_color", Color(1.0, 0.42, 0.36))
+	selected_label.text = text
+	var tw := Motion.tween(selected_label, "linear")
+	tw.tween_interval(1.2)
+	tw.tween_callback(func() -> void:
+		selected_label.add_theme_color_override("font_color", Color(1, 0.9, 0.5))
+		_update_selected_label())
+
+
+## 每帧轮询卡牌悬停：精确判断鼠标是否在旋转后的卡牌内（避免相邻牌误判）
+## mouse_override 仅供自动化测试顶替真实鼠标（与 _update_metric_tip 同一个套路），
+## 正常游戏不传 —— 但手牌陀螺仪要拍证据，就必须能凭空指定一个悬停点。
+func _update_card_hover(delta: float, mouse_override: Vector2 = Vector2.INF) -> void:
+	if sandpan_view and (sandpan_view.collapsed or sandpan_view.board_cards_attached): return
+	if hand_panel.visible == false or card_infos.is_empty():
+		return
+	if _score_animating:
+		# 算分动画期间由动画独占控制卡牌位置/缩放（本函数每帧把牌拽回 base_pos）。
+		# 但倾斜要收回：牌正被动画带着飞，残留的歪角会让飞出去的牌看着还是斜的。
+		_decay_hand_gyro(delta)
+		return
+	var mouse_global := mouse_override if mouse_override != Vector2.INF else get_viewport().get_mouse_position()
+	var box_tf := card_box.get_global_transform()
+	# 用稳定素材轮廓进入悬停，悬停后保留初始轮廓与当前卡面的并集。
+	# 视觉抬起不能自行撤销鼠标命中；点击仍由实际透视卡面单独判断。
+	var hits: Array = []   # 命中的 card_infos 下标
+	for i in card_infos.size():
+		var info: Dictionary = card_infos[i]
+		var panel: PanelContainer = info["panel"]
+		if not is_instance_valid(panel):
+			continue
+		if info.get("dragging", false):
+			continue
+		# Staged cards are laid out in their own table row and never participate in fan hover.
+		if info.get("staged_by_drag", false):
+			info["hovered"] = false
+			continue
+		# flying = 正在被动画独占控制（算分飞牌 / 手牌收拢发牌），别做悬停命中
+		if info.get("shaking", false) or info.get("flying", false):
+			info["hovered"] = false
+			continue
+		var rest: Vector2 = info["base_pos"] + info["radial"] * (CARD_RAISE if info["selected"] else 0.0)
+		var angle: float = info["theta"]
+		var origin := rest + panel.pivot_offset - panel.pivot_offset.rotated(angle)
+		var stable := box_tf * Transform2D(angle, Vector2.ONE, 0.0, origin)
+		var base_hit: bool = preload("res://scripts/card_geometry.gd").contains(panel, mouse_global, stable, true)
+		var held_hit: bool = info.get("hovered", false) and _point_in_card(panel, info["base_pos"], mouse_global, box_tf)
+		if base_hit or held_hit:
+			hits.append(i)
+	# 2) 重叠时只留最上层那张：从子列表末尾（最后绘制 = 最上层）往前找第一个命中的
+	var hovered_idx: int = -1
+	if _card_dragging:
+		hits.clear()
+	if hits.size() == 1:
+		hovered_idx = hits[0]
+	elif hits.size() > 1:
+		var children: Array = card_box.get_children()
+		for c in range(children.size() - 1, -1, -1):
+			for i in hits:
+				if card_infos[i]["panel"] == children[c]:
+					hovered_idx = i
+					break
+			if hovered_idx != -1:
+				break
+	# 3) 驱动弹起 / 放大（与帧率无关的平滑，替代固定系数 lerp）
+	for i in card_infos.size():
+		var info: Dictionary = card_infos[i]
+		var panel: PanelContainer = info["panel"]
+		# ⚠ flying 必须在这里挡住：本函数每帧把牌 lerp 回 base_pos，
+		#   会与飞行 tween 逐帧打架（表现为牌往目标飞一点又被拽回来，来回抖）。
+		#   算分动画靠 _score_animating 整段挡掉了本函数所以看不出问题，
+		#   手牌收拢发牌没有那种全局开关，只能靠这个逐张的标志。
+		if not is_instance_valid(panel):
+			continue
+		if info.get("staged_by_drag", false):
+			info["hovered"] = false
+			if not info.get("shaking", false) and not info.get("flying", false):
+				var staged_active: bool = bool(info.get("dragging", false)) or _point_in_card(panel, info["base_pos"], mouse_global, box_tf)
+				_step_card_gyro(panel, _card_gyro_target(panel, mouse_global, staged_active, true), delta)
+			continue
+		if info.get("shaking", false) or info.get("flying", false):
+			continue  # 抖动 / 飞行期间不要抢它的 position
+		if info.get("dragging", false):
+			_step_card_gyro(panel, _card_gyro_target(panel, mouse_global, true, true), delta)
+			continue
+		var hovering: bool = (i == hovered_idx)
+		info["hovered"] = hovering
+		panel.get_theme_stylebox("panel").set_meta("card_outline", hovering or info["selected"])
+		# 抬起：鼠标悬停的牌 + 已选定的牌（已选牌保持"抬起来挂在那儿"的状态）
+		var raised: bool = hovering or info["selected"]
+		# 弹起方向：沿径向向外（远离圆心，即向上弹出）
+		var target: Vector2 = info["base_pos"] + info["radial"] * (CARD_RAISE if raised else 0.0)
+		if _card_dragging:
+			target += _card_drag_neighbor_offset(info)
+		# Preserve momentum when the pointer changes cards quickly. Retargeting the
+		# same spring each frame keeps hover/selection handoffs continuous.
+		MotionSpring.to(panel, "position", target, 430.0, 32.0)
+		var s: float = 1.08 if hovering else 1.0
+		MotionSpring.to(panel, "scale", Vector2(s, s), 390.0, 30.0)
+		var tilt: float = info["theta"]
+		if hovering:
+			tilt *= 0.65
+		MotionSpring.to(panel, "rotation", tilt, 460.0, 34.0)
+		# 陀螺仪：悬停那一张跟着鼠标做 3D 透视倾斜（与牌库 / 知识卡图鉴同一套系数）
+		_step_card_gyro(panel, _card_gyro_target(panel, mouse_global, hovering, true), delta)
+	_update_card_stack()
+
+
+## 手牌不在焦点 / 算分动画期间：把残留的倾斜平滑收回
+func _decay_hand_gyro(delta: float) -> void:
+	for info in card_infos:
+		var panel: PanelContainer = info.get("panel")
+		if not is_instance_valid(panel):
+			continue
+		_step_card_gyro(panel, Vector2.ZERO, delta)
+
+
+## Give cards near the moving card room to breathe; spring targets return to the fan on release.
+func _card_drag_neighbor_offset(info: Dictionary) -> Vector2:
+	if not _card_dragging or info.get("dragging", false) or not _is_hand_drop_target(_card_drag_mouse):
+		return Vector2.ZERO
+	var panel: PanelContainer = info["panel"]
+	var drag_x := _screen_to_card_box(_card_drag_mouse).x
+	var card_x: float = float(info["base_pos"].x) + panel.pivot_offset.x
+	var delta_x := card_x - drag_x
+	if is_zero_approx(delta_x):
+		return Vector2.ZERO
+	var reach := 150.0
+	var influence := 1.0 - clampf(absf(delta_x) / reach, 0.0, 1.0)
+	# Ease the pressure so neighbours peel away progressively instead of snapping to slots.
+	influence = influence * influence * (3.0 - 2.0 * influence)
+	return Vector2(signf(delta_x) * 30.0 * influence, -7.0 * influence)
+
+
+## 手牌分三层叠放（像斗地主那样，选中的牌整体浮起一排）：
+##   底层 = 未选中的牌 → 中层 = 已选中的牌 → 顶层 = 鼠标正悬停的那张
+## Godot 里兄弟节点越靠后越晚绘制、也就越在上层，所以把三组按这个顺序排进子列表即可。
+## 各层内部保持原本的左右顺序；鼠标一移开，悬停那张就插回它自己那一层（不留痕迹）。
+## 只改「绘制与拾取顺序」，不动任何坐标，所以不会和扇形布局打架。
+func _update_card_stack() -> void:
+	if card_infos.is_empty():
+		return
+	var front: PanelContainer = null
+	for info in card_infos:
+		if info.get("dragging", false) and is_instance_valid(info["panel"]):
+			front = info["panel"]
+			break
+	if front == null:
+		for info in card_infos:
+			if info.get("hovered", false) and is_instance_valid(info["panel"]):
+				front = info["panel"]
+				break
+	var plain: Array = []   # 未选中
+	var picked: Array = []  # 已选中
+	for info in card_infos:
+		var panel: PanelContainer = info["panel"]
+		if not is_instance_valid(panel) or panel == front:
+			continue
+		if info["selected"]:
+			picked.append(panel)
+		else:
+			plain.append(panel)
+	var want: Array = plain.duplicate()
+	want.append_array(picked)
+	if front != null:
+		want.append(front)
+	# 与当前顺序一致就不动，避免每帧无谓重排
+	var cur: Array = card_box.get_children()
+	if cur.size() == want.size():
+		var same := true
+		for i in want.size():
+			if cur[i] != want[i]:
+				same = false
+				break
+		if same:
+			return
+	for i in want.size():
+		card_box.move_child(want[i], i)
+
+
+## 判断鼠标是否落在当前可见卡面；包含扇形旋转、缩放与陀螺仪透视。
+func _point_in_card(panel: PanelContainer, _base_pos: Vector2, mouse_global: Vector2, _box_tf: Transform2D) -> bool:
+	return preload("res://scripts/card_geometry.gd").contains(panel, mouse_global)
+
+
+## 金色闪光框（选中标记，呼吸发光）
+func _apply_gold_frame(panel: PanelContainer) -> void:
+	_stop_card_glow(panel)
+	var sb := VisualTheme.card_style(true)
+	panel.add_theme_stylebox_override("panel", sb)
+	var tw := Motion.tween(panel, "pulse", "selection").set_loops()
+	panel.set_meta("selection_glow", tw)
+	Motion.curve(tw, "sine.inOut")
+	tw.tween_property(sb, "border_color", Color("fff3b0"), 0.8)
+	tw.tween_property(sb, "border_color", VisualTheme.GOLD, 0.8)
+
+
+func _stop_card_glow(panel: PanelContainer) -> void:
+	var tw: Tween = panel.get_meta("selection_glow") if panel.has_meta("selection_glow") else null
+	if tw and tw.is_valid(): tw.kill()
+	if panel.has_meta("selection_glow"): panel.remove_meta("selection_glow")
+
+
+func _remove_gold_frame(panel: PanelContainer) -> void:
+	_stop_card_glow(panel)
+	panel.add_theme_stylebox_override("panel", VisualTheme.card_style())
+
+
+func _finish_turn() -> void:
+	if _score_animating or _sort_animating or _cards_waiting_for_board():
+		return      # 算分动画 / 手牌排序进行中，忽略连点
+	_stop_deal_sfx()
+	_card_press_panel = null
+	_card_dragging = false
+	_card_drag_index = -1
+	if drag_play_hint: drag_play_hint.hide()
+	if sandpan_view: sandpan_view.prepare_settlement()
+
+	# 执行所有选中的卡（防御：资金/行动位不足的记录为失败，不静默吞掉）
+	GameState.clear_score_ledger()
+	# ★ 出牌**前**的快照：这是本轮动画的起点，也是唯一含「本轮牌加成」的口径。
+	#   注意与下面那个 before 的区别 —— 那个取在 execute_action 之后，是弹窗文案用的旧口径。
+	var before_all: Dictionary = GameState.metrics.duplicate()
+	var failed: Array = []
+	var played: Array = []      # 按桌面摆放顺序成功执行的卡片下标
+	var staged_indices := _ordered_staged_indices()
+	# ★ 必须在 execute_action 之前置位：否则每张牌 emit 的 metrics_changed
+	#   会把指标条先刷到中途值，动画还没开始就已经跳过了。
+	_score_animating = true
+	_refresh_allocation_controls()
+	for i in staged_indices:
+		var info: Dictionary = card_infos[i]
+		var is_dispatched: bool = info.get("dispatched", false)
+		# 付款信号在 execute_action 内发射，提前移出待付账本，避免重复计费。
+		info["budget_executed"] = true
+		if GameState.execute_action(info["card_id"], _info_tier(info), is_dispatched):
+			info["sandpan_state"] = wetland.capture_state()
+			played.append(i)
+		else:
+			info["budget_executed"] = false
+			failed.append(info["card_id"])
+		if GameState.game_over:
+			break   # 已经判负，剩下的牌不再执行
+
+	# 成就判定放在判负早退**之前**：玩家确实打出了三张同类别，
+	# 哪怕这一手同时把自己打崩了，成就也该照给。
+	_check_flush_achievement(played)
+
+	# 判负即时化：出牌当场把指标打到致死线以下 → 不播动画、直接给失败报告
+	# （保住已修复的 P0 体验：判负必须立刻可见，不能先播 2.8 秒动画）
+	if GameState.game_over:
+		_score_animating = false
+		_update_hud()
+		_update_3d()
+		if _current_phase != "popup_report":
+			_show_report(GameState.generate_report())
+		return
+
+	var before: Dictionary = GameState.metrics.duplicate()
+	_defer_game_over = true   # 结算流程自己按「结算反馈 → 报告」的顺序收尾
+	GameState.end_turn()
+	_defer_game_over = false
+	var after: Dictionary = GameState.metrics
+	var ledger: Array = GameState.score_ledger.duplicate(true)
+
+	var lines: Array = []
+	if GameState.last_crisis_name != "":
+		lines.append("⚠ 危机爆发：%s" % GameState.last_crisis_name)
+		lines.append("")
+	lines.append("本回合结算：")
+	for metric in GameState.METRIC_NAMES:
+		var d: int = after[metric] - before[metric]
+		if d != 0:
+			lines.append("  %s：%+d" % [GameState.METRIC_NAMES[metric], d])
+	for msg in GameState.log_messages:
+		lines.append("  · %s" % msg)
+	lines.append("")
+	# 指标换来的额外拨款：**只报结果，不解释是哪一项换来的** ——
+	# 「哪些指标决定钱」属于隐性参数，要玩家自己从数字里总结（与 METRIC_REMEDY 同一条铁律）。
+	if GameState.last_metric_funding != 0:
+		lines.append("额外拨款：%+d 万" % GameState.last_metric_funding)
+	lines.append("结转资金：%d 万(未用资金享 %d%% 利息，上限 %d 万)" % [GameState.carry, int(GameState.INTEREST_RATE * 100), GameState.MAX_CARRY])
+	# 下回合危机预警。
+	# ⚠ 光报名字是不够的：危机是在**下回合结算时**才爆发的，而玩家在结算弹窗里看到的
+	#    指标是「本回合结算后」的值（还都在红线上）。只写个名字，玩家点「继续」
+	#    下一刻就判负，会觉得「明明条都还是绿的，怎么就输了」。所以这里必须把
+	#    「会掉多少 → 大概落到哪 → 会不会跌破红线」逐项写清楚。
+	if not GameState.pending_crisis.is_empty():
+		lines.append("")
+		lines.append("[color=#ffb060]⏳ 预警：%s(下回合结算时爆发)[/color]" % GameState.pending_crisis["name"])
+		var fatal_names: Array = []
+		for e in GameState.pending_crisis.get("effects", []):
+			var em := str(e["metric"])
+			var ed := int(e["delta"])
+			var ecur := GameState.metric_failure_value(em)
+			var eline := GameState.failure_threshold_for(em)
+			var eafter := clampi(ecur + ed, 0, 100)
+			var verdict := "[color=#7ee08a]仍在生态红线 %d 之上[/color]" % eline
+			if em == "birds" and bool(GameState.pending_crisis.get("migrant_only", false)):
+				ed = -mini(-ed, int(GameState.bird_snapshot()["migrants"])) if ed < 0 else ed
+				eafter = clampi(ecur + ed, 0, 100)
+			if em == "water_level":
+				var next_season: String = GameState.SEASONS[GameState.turn % 4]
+				var pressure: Dictionary = GameState.water_pressure(eafter, next_season)
+				verdict = "[color=#ffcc66]水位不直接判负；%s季参考 %d–%d，%s[/color]" % [GameState.SEASON_NAMES[next_season], pressure["low"], pressure["high"], {"safe": "区间内", "low": "注意干旱", "high": "注意淹水"}[pressure["side"]]]
+			elif eafter < eline:
+				verdict = "[color=#ff5a5a]会跌破生态红线 %d[/color]" % eline
+				fatal_names.append(str(GameState.METRIC_NAMES.get(em, em)))
+			var effect_name: String = "候鸟总量" if em == "birds" else str(GameState.METRIC_NAMES.get(em, em))
+			lines.append("  %s %+d → 约 %d，%s" % [effect_name, ed, eafter, verdict])
+		for legacy in GameState.pending_crisis.get("legacy_effects", []):
+			lines.append("  %s %+d，%s" % ["候鸟食物" if str(legacy["kind"]) == "food" else "秋季水位遗留", int(legacy["delta"]),
+				"持续至本年冬末，可修复" if str(legacy["kind"]) == "food" else "秋季开局一次生效"])
+		# 逐项列了数字，但玩家未必会自己加总 —— 会致死时再补一句总括。
+		# ⚠ 措辞要**如实反映还能补救**：危机是在下一回合的回合末才结算的，
+		#   玩家下一回合整回合可以出牌把这一项拉上去，真的有可能救回来。
+		#   （早先这里写过「来不及补救了」—— 那是照搬危机还在「下回合开局」结算时的
+		#     旧时序，时序一挪就变成了假话。文案必须跟着机制走。）
+		if not fatal_names.is_empty():
+			lines.append("[color=#ff5a5a][b]⚠ 下回合结算时若仍未改善，将因「%s」跌破生态红线而被撤换[/b][/color]" % "、".join(fatal_names))
+		var counter_names: Array = []
+		for cid in GameState.counter_card_ids():
+			counter_names.append(_card_name(cid))
+		var shown_c: Array = counter_names.slice(0, 3)
+		var tail_c: String = "" if counter_names.size() <= 3 else " 等 %d 张" % counter_names.size()
+		lines.append("[color=#8a8a8a]   (专项响应已列入下批：%s%s)[/color]" % ["、".join(shown_c), tail_c])
+
+	# ★ 算分动画。必须在收起手牌 / 侧栏之**前**播 —— 指标行得留在屏幕上才有的演。
+	await _play_score_animation(ledger, before_all, played, after)
+
+	hand_panel.visible = false
+	bottom_right.visible = false
+	tier_lever.visible = false
+	_slide_side_panels(true)  # 结算后侧边栏收回屏幕外，让出沙盘
+	_current_phase = "popup_settlement"
+	_refresh_allocation_controls()
+	_update_turn_budget_label()
+	_show_popup("结算反馈", "\n".join(lines), "继续", _on_resolve_continue)
+	# 结算弹窗铺好之后再放攒下的危机预警/爆发。
+	# ⚠ 此时 popup_root 已可见，所以 _on_crisis_dismiss 里那句
+	#   `elif not popup_root.visible: _enter_allocate()` 不会误触发 ——
+	#   否则玩家在结算期间点掉危机弹窗会直接跳进分配阶段、把刚发的手牌重建掉。
+	_process_crisis_queue()
+
+
+## 小丑牌风算分动画：甩牌 → 逐张弹分 → 指标从上到下结算（含四类来源小票）
+##
+## 时长预算（秒）：甩牌 0.00-0.35 / 逐张弹分 0.35-1.40 / 指标结算 1.40-2.80
+##
+## ⚠ 时序一律用 create_timer，**绝不用 await tw.finished**：
+##   Tween 被 kill() 时 finished 永远不会发射，await 会永久挂起 = 游戏假死。
+## ⚠ 每个 await 之后都要校验 _score_anim_id：动画可能被重开/回主菜单作废。
+## ⚠ 本函数不做任何游戏逻辑、不碰任何随机数 —— 它只是「回放」已经算完的流水账。
+##   一旦在这里调了带 roll_random 的推演，同种子复现就废了。
+func _play_score_animation(ledger: Array, before_all: Dictionary, played: Array, after: Dictionary) -> void:
+	const T_FLY_END := 0.55
+	const FLY_DUR := 0.48          # 从小牌桌连续放大回到结算区
+	const FLY_LAG := 0.045
+	const FLY_SPACING := STAGED_CARD_SPACING # 与已打出区保持相同牌边间距
+	const CARD_BUDGET := 1.30      # 逐张弹分总预算（0.35 → 1.65）
+	const CARD_BEAT_MIN := 0.24
+	const CARD_BEAT_MAX := 0.45
+	const T_TOTAL := 3.00          # 全片目标时长（实测含收尾约 3.45s；玩测反馈偏快，已放慢）
+	const METRIC_MIN_STEP := 0.07
+	const METRIC_MAX_STEP := 0.55
+	const IDLE_WEIGHT := 0.25      # 未变动指标的权重（快速掠过）
+	const SHAKE_A := 7.0           # 卡牌抖动振幅（像素）
+	const DISMISS_DY := 260.0      # 未选中牌向下滑出的距离（手牌贴屏幕底，260 足够完全出屏）
+	const DISMISS_DUR := 0.26      # 滑出时长
+	const DISMISS_LAG := 0.012     # 相邻牌轻微错开，做出"扫过去"的层次
+
+	# 玩家在设置里可调的「结算速度」。这里是**时长倍率**（速度的倒数）：
+	# 速度 0.5× → 时长 2×。下面每一处节拍都乘它，整段动画才是匀速缩放，
+	# 不会出现「某个阶段还是原速」的断层。
+	var ds: float = 1.0 / clampf(score_speed, SCORE_SPEED_MIN, SCORE_SPEED_MAX)
+	var my_id := _score_anim_id
+	var vp := get_viewport().get_visible_rect().size
+	var t_start := Time.get_ticks_msec() / 1000.0
+
+	# ---- 建索引：metric → phase → 条目；card_id → 该卡的即时效果 ----
+	var by_metric: Dictionary = {}
+	for metric in GameState.METRIC_NAMES:
+		by_metric[metric] = {}
+	var card_fx: Dictionary = {}
+	for e in ledger:
+		var ph: String = str(e["phase"])
+		# crisis 也进小票了：危机结算已从「下回合开局」挪到「回合末」
+		# （见 game_state.gd 的 end_turn 注释），所以它本来就该出现在本回合的结算里。
+		var mt: String = str(e["metric"])
+		if not by_metric.has(mt):
+			continue
+		if not by_metric[mt].has(ph):
+			by_metric[mt][ph] = []
+		by_metric[mt][ph].append(e)
+		# card_delayed 是延迟效果的「预告」（applied=0），只用来在牌上标「N 回合后」，
+		# 不参与小票求和（它不在 SCORE_PHASE_ORDER 里）
+		if ph == "card" or ph == "card_delayed":
+			var rid: String = str(e["ref_id"])
+			if not card_fx.has(rid):
+				card_fx[rid] = []
+			card_fx[rid].append(e)
+
+	# ---- ① 甩牌（0.00 → 0.35）----
+	score_layer.visible = true
+	score_receipt.visible = false
+	# 把指标条钉回出牌前的值：动画从这里出发，不受之前残留 tween 的影响
+	for metric in metric_bars:
+		metric_bars[metric]["bar"].value = float(before_all.get(metric, 0))
+		metric_bars[metric]["val"].text = str(int(before_all.get(metric, 0)))
+
+	# Settlement owns the pose: queued movement and hand arrival must stop first,
+	# including springs that still carry velocity after rapid consecutive drops.
+	for info in card_infos:
+		var panel: PanelContainer = info["panel"]
+		if not is_instance_valid(panel): continue
+		for key in ["position", "rotation", "scale"]: MotionSpring.stop(panel, key)
+		CardFlight.stop(panel)
+		Motion.cancel(panel, "deal")
+		info["dealing"] = false
+		info["queue_flying"] = false
+		info["returning"] = false
+		info["dragging"] = false
+	var landing_targets: Dictionary = {}
+	var n_played: int = played.size()
+	# 落点间距：默认 FLY_SPACING（牌宽 122 + 24 的余量）。简单模式一回合最多可能出现
+	# **5 张**（4 个行动位 + 1 张紧急调度），此时整行 4×146 + 122 = 706px，1280 宽下放得下；
+	# 但仍按可用宽度收一道口子 —— 以后若放宽行动位、或窗口比例变化，不至于把牌挤出屏幕。
+	# 行本身是**居中**排的（下面 slot 用 k - (n-1)/2 算），所以收紧后左右余量仍然相等。
+	var spacing: float = FLY_SPACING
+	if n_played > 1:
+		var row_limit: float = vp.x * 0.86 - 122.0
+		if float(n_played - 1) * FLY_SPACING > row_limit:
+			spacing = maxf(96.0, row_limit / float(n_played - 1))
+	var slot_y: float = vp.y * 0.42
+	for k in n_played:
+		var info: Dictionary = card_infos[played[k]]
+		var panel: PanelContainer = info["panel"]
+		if not is_instance_valid(panel):
+			continue
+		info["flying"] = true          # 让 _update_card_hover 让出控制权（照抄 shaking 的既有模式）
+		panel.z_index = 900 + k
+		panel.modulate.a = 1.0
+		_step_card_gyro(panel, Vector2.ZERO, 1.0)
+		var slot := Vector2(vp.x * 0.5 + (float(k) - float(n_played - 1) * 0.5) * spacing, slot_y)
+		var target: Vector2 = _screen_to_card_box(slot) - panel.pivot_offset
+		landing_targets[panel] = target
+		var d: float = k * FLY_LAG * ds
+		CardFlight.play(panel, target, Vector2.ONE, 0.0, FLY_DUR * ds, 66.0, Callable(), d)
+		# 甩牌落桌：闷响，比叮低一档，做"拍在桌上"的质感
+		play_sfx("land", 1.0 + 0.05 * float(k), -4.0)
+
+	# 未选中的牌同步「收走」：向下滑出 + 淡出。
+	# 留在原地会变成碍眼的背景，视觉上也说不通 —— 这一手已经打完了。
+	# 与选中牌往上飞形成一上一下的分流，读起来就是「打出去的留下、没用的清掉」。
+	var dismissed: int = 0
+	for i in card_infos.size():
+		if played.has(i):
+			continue
+		var info_u: Dictionary = card_infos[i]
+		var panel_u: PanelContainer = info_u["panel"]
+		if not is_instance_valid(panel_u):
+			continue
+		info_u["flying"] = true      # 同样让 _update_card_hover 让出控制权
+		# 错开量按「第几张被收走」算，不按手牌下标 —— 否则手牌一多，
+		# 最后一张的延迟会拖过 T_FLY_END，跟后面第一处代次校验抢时序。
+		var du: float = float(dismissed) * DISMISS_LAG
+		dismissed += 1
+		var tw_u := Motion.tween(panel_u, "linear")
+		tw_u.set_parallel(true)
+		Motion.curve(tw_u, "power2.in")
+		tw_u.tween_property(panel_u, "position:y", panel_u.position.y + DISMISS_DY, DISMISS_DUR).set_delay(du)
+		tw_u.tween_property(panel_u, "modulate:a", 0.0, DISMISS_DUR * 0.75).set_delay(du)
+		tw_u.tween_property(panel_u, "scale", Vector2(0.88, 0.88), DISMISS_DUR).set_delay(du)
+
+	# The fifth card starts later: wait for the last flight, not just the first beat.
+	var fly_end := maxf(T_FLY_END, FLY_DUR + float(maxi(0, n_played - 1)) * FLY_LAG)
+	await get_tree().create_timer(fly_end * ds).timeout
+	if _score_anim_id != my_id:
+		return _score_anim_cleanup()
+
+	# Resolve sub-frame tween timing at the shared landing pose before any score pop.
+	for panel in landing_targets:
+		if not is_instance_valid(panel): continue
+		CardFlight.stop(panel)
+		Motion.cancel(panel, "score_flight")
+		Motion.cancel(panel, "score_rotation")
+		panel.position = landing_targets[panel]
+		panel.rotation = 0.0
+		panel.scale = Vector2.ONE
+		_step_card_gyro(panel, Vector2.ZERO, 1.0)
+
+	# ---- ② 逐张弹分（0.35 → 1.40）----
+	var card_beat: float = clampf(CARD_BUDGET * ds / float(maxi(1, n_played)), CARD_BEAT_MIN * ds, CARD_BEAT_MAX * ds)
+	for k in n_played:
+		var info: Dictionary = card_infos[played[k]]
+		var panel: PanelContainer = info["panel"]
+		if not is_instance_valid(panel):
+			continue
+		_play_card_shake(panel, SHAKE_A, 1.0 + 0.12 * float(k), ds)
+		# 连击音阶：逐张升高半音，是小丑牌那种层层叠加感的听觉来源
+		# 逐张弹分的叮：连击音阶是灵魂，但**不要给满音量** ——
+		# 3~4 张牌各响一次 0dB，和指标合计的 0dB 叠起来能到 9 次满音量，玩测反馈"吵"。
+		# 现在压到 -4dB，把"最响"留给指标合计那一下"落定"。
+		play_sfx("ding", 1.0 + 0.05 * float(k), -4.0)
+		var fx: Array = card_fx.get(str(info["card_id"]), [])
+		if wetland and info.has("sandpan_state"):
+			wetland.play_action(str(info["card_id"]), info["sandpan_state"], card_beat)
+		var anchor: Vector2 = panel.global_position + Vector2(panel.size.x * 0.5, 0.0)
+		for j in fx.size():
+			var e: Dictionary = fx[j]
+			var col: Color = METRIC_COLORS.get(str(e["metric"]), Color.WHITE)
+			if str(e["phase"]) == "card_delayed":
+				# 延迟预告压暗一档，与「已经落地」的即时效果在视觉上区分开
+				col = col.lerp(Color(0.72, 0.70, 0.66), 0.45)
+			_play_delta_float(_fmt_delta_line(e), col,
+					anchor + Vector2(0.0, -20.0 * float(j)), 0.04 + 0.05 * float(j))
+		await get_tree().create_timer(card_beat).timeout
+		if _score_anim_id != my_id:
+			return _score_anim_cleanup()
+
+	# Delayed effects, synergy, natural evolution and crises follow the card replay.
+	# Presentation uses snapshots only; never execute cards or roll RNG again.
+	if wetland: wetland.sync_state({}, true, 0.85 * ds)
+	# ---- ③+④ 指标结算（→ 2.80）：按已耗时自适应预算，保证总时长贴近 2.8s ----
+	var elapsed: float = Time.get_ticks_msec() / 1000.0 - t_start
+	# 指标结算节拍的时长倍率（速度 ÷0.8 ⇔ 时长 ×1.25）
+	var ms: float = 1.0 / METRIC_SPEED
+	var budget: float = maxf(0.6 * ds, T_TOTAL * ds - elapsed) * ms
+	var weights: Dictionary = {}
+	var wsum: float = 0.0
+	for metric in GameState.METRIC_NAMES:
+		var w: float = IDLE_WEIGHT
+		if _phase_sum(by_metric[metric]) != 0:
+			w = 0.55 + 0.14 * float(by_metric[metric].size())
+		weights[metric] = w
+		wsum += w
+	for metric in GameState.METRIC_NAMES:
+		var step: float = clampf(budget * float(weights[metric]) / maxf(wsum, 0.001),
+				METRIC_MIN_STEP * ms, METRIC_MAX_STEP * ms)
+		await _play_metric_settle(metric, by_metric[metric], before_all, after, step)
+		if _score_anim_id != my_id:
+			return _score_anim_cleanup()
+
+	# 已执行的卡在完整计分后燃烧退场；未出的手牌仍按原来的收牌路径离开。
+	if n_played > 0 and wetland and not wetland.reduced_motion:
+		for k in n_played:
+			var panel: PanelContainer = card_infos[played[k]]["panel"]
+			if is_instance_valid(panel):
+				preload("res://scripts/card_burn.gd").play(panel, 0.48 * ds, float(k) * 0.025 * ds)
+		await get_tree().create_timer((0.48 + float(n_played - 1) * 0.025) * ds).timeout
+		if _score_anim_id != my_id:
+			return _score_anim_cleanup()
+	# ---- 收尾 ----
+	await get_tree().create_timer(0.12 * ds).timeout
+	if _score_anim_id != my_id:
+		return _score_anim_cleanup()
+	_score_anim_cleanup()
+
+
+## 某个指标的四类来源合计（按 applied 求和，天然含 clampi 截断修正）
+func _phase_sum(by_phase: Dictionary) -> int:
+	var s: int = 0
+	for ph in by_phase:
+		for e in by_phase[ph]:
+			s += int(e["applied"])
+	return s
+
+
+## 单项指标的结算演出：图标放大抖动 → 四类来源小数字依次弹 → 合计 → 数值条推进
+func _play_metric_settle(metric: String, by_phase: Dictionary, before_all: Dictionary,
+		after: Dictionary, step: float) -> void:
+	const ICON_SCALE := 1.75        # 图标放大倍数
+	const ICON_UP := 0.07           # 放大耗时
+	const ICON_SHAKE := 0.03        # 抖动单次行程
+	const ICON_DOWN := 0.09         # 缩回耗时
+	const SUB_GAP_MIN := 0.045
+	const SUB_GAP_MAX := 0.075
+	# 指标结算段的时长倍率（见 METRIC_SPEED）。下面每一处时长都要乘它 ——
+	# 少乘一处就会露出「某一段还是原速」的破绽。
+	var ms: float = 1.0 / METRIC_SPEED
+
+	var icon: TextureRect = metric_bars[metric]["icon"]
+	var bar: ProgressBar = metric_bars[metric]["bar"]
+	var val: Label = metric_bars[metric]["val"]
+	var row: VBoxContainer = metric_bars[metric]["row"]
+
+	# 图标 pivot 必须运行时取：容器会把图标纵向拉伸，写死尺寸会绕着错的点缩放
+	if is_instance_valid(icon):
+		icon.pivot_offset = icon.size * 0.5
+		var ti := Motion.tween(icon, "linear")
+		Motion.curve(ti, "back.out")
+		ti.tween_property(icon, "scale", Vector2(ICON_SCALE, ICON_SCALE), ICON_UP * ms)
+		Motion.curve(ti, "sine.inOut")
+		for r in 3:
+			ti.tween_property(icon, "rotation", deg_to_rad(7.0), ICON_SHAKE * ms)
+			ti.tween_property(icon, "rotation", deg_to_rad(-7.0), ICON_SHAKE * ms)
+		ti.tween_property(icon, "rotation", 0.0, ICON_SHAKE * ms)
+		Motion.curve(ti, "power2.out")
+		ti.tween_property(icon, "scale", Vector2.ONE, ICON_DOWN * ms)
+
+	# 四类来源：按展示顺序累计真值，最后一段强制对齐录制真值
+	var parts: Array = []
+	var acc: int = int(before_all.get(metric, 0))
+	for ph in SCORE_PHASE_ORDER:
+		if not by_phase.has(ph):
+			continue
+		var v: int = _phase_sum({ph: by_phase[ph]})
+		acc += v
+		parts.append({"phase": ph, "value": v, "capped": _phase_capped(by_phase[ph]),
+				"target": clampi(acc, 0, 100)})
+	var true_end: int = int(after.get(metric, acc))
+	if not parts.is_empty():
+		parts[parts.size() - 1]["target"] = true_end   # ★ 末段对齐真值 → 终点恒正确
+
+	var shown: Array = parts.filter(func(p): return int(p["value"]) != 0)
+	# 0.22 是留给「图标各段 + 合计」的固定时间，同样要跟着缩放
+	var gap: float = clampf((step - 0.22 * ms) / float(maxi(1, shown.size())),
+			SUB_GAP_MIN * ms, SUB_GAP_MAX * ms)
+
+	# 小票：先填第一行并定位，再逐行追加
+	_rebuild_receipt(metric, shown, 0, true_end)
+	await get_tree().process_frame      # 等容器算完 size 才能定位
+	_place_receipt(row)
+	for i in shown.size():
+		if i > 0:
+			_rebuild_receipt(metric, shown, i, true_end)
+		# 小数字逐次降 key 且压到 -8dB；合计给 0dB —— 听感是「噼啪数完 → 咚，落定」。
+		# 不分层的话，1.4 秒内响十几次会变成机关枪。
+		play_sfx("ding", 1.15 - 0.05 * float(i), -11.0)
+		var seg: float = gap
+		var target_v: int = int(shown[i]["target"])
+		var tbs := Motion.tween(bar, "linear", "value")
+		Motion.curve(tbs, "power2.out")
+		tbs.tween_property(bar, "value", float(target_v), seg)
+		await get_tree().create_timer(seg).timeout
+
+	if shown.is_empty():
+		# 该项本轮无变化：图标只放大缩回，数值不动
+		await get_tree().create_timer(step).timeout
+		return
+
+	# 合计 + 数值文本
+	await get_tree().create_timer(maxf(0.0, step * 0.62 - gap * float(shown.size()))).timeout
+	_rebuild_receipt(metric, shown, shown.size(), true_end)
+	# 合计的那一声是整段里最"重"的落定音（0dB 层里最低频），
+	# 其余都压在它之下，听感才是"噼啪数完 → 咚，落定"
+	play_sfx("ding", 0.85, -3.0)
+	var delta := true_end - int(before_all.get(metric, 0))
+	if delta != 0 and impact_feedback != null:
+		impact_feedback.pulse(val, METRIC_COLORS.get(metric, Color.WHITE) if delta > 0 else Color("e78272"),
+			clampf(0.65 + absf(float(delta)) * 0.04, 0.65, 1.5))
+	var tbf := Motion.tween(bar, "linear", "value")
+	Motion.curve(tbf, "power2.out")
+	tbf.tween_property(bar, "value", float(true_end), maxf(0.10 * ms, step * 0.25))
+	val.text = str(true_end)
+	var tv := Motion.tween(val, "linear")
+	Motion.curve(tv, "back.out")
+	tv.tween_property(val, "scale", Vector2(1.25, 1.25), 0.06 * ms)
+	tv.tween_property(val, "scale", Vector2.ONE, 0.08 * ms)
+	await get_tree().create_timer(maxf(0.0, step * 0.38)).timeout
+
+
+## 该 phase 的条目里有没有被 clampi 截断的（用于「已满/见底」角标）
+func _phase_capped(entries: Array) -> bool:
+	for e in entries:
+		if int(e["applied"]) != int(e["raw"]):
+			return true
+	return false
+
+
+## 把一笔增减格式化成「水质 +8」/「水质 +0（已满）」/「水质 +4（2 回合后）」
+func _fmt_delta_line(e: Dictionary) -> String:
+	var name: String = str(GameState.METRIC_NAMES.get(str(e["metric"]), str(e["metric"])))
+	# 延迟效果的预告：显示 raw（未来会生效的值）而不是 applied（恒为 0），
+	# 并带上倒计时 —— 否则会显示成「水质 +0」，比不显示更让人困惑
+	if str(e["phase"]) == "card_delayed":
+		# ⚠ 口径：remaining=1 表示**本回合结算时**就生效，不是「1 回合后」——
+		# advance_effects() 在本回合的 end_turn 里就把它减到 0 并立即结算了。
+		# 所以 remaining>=2 时，真正还要等的回合数是 remaining-1。
+		var rem: int = int(e.get("remaining", 1))
+		var when: String = "本回合结算时生效" if rem <= 1 else "%d 回合后生效" % (rem - 1)
+		return "%s %+d(%s)" % [name, int(e["raw"]), when]
+	var applied: int = int(e["applied"])
+	var suffix: String = ""
+	if applied != int(e["raw"]):
+		suffix = "(已满)" if applied >= 0 else "(见底)"
+	return "%s %+d%s" % [name, applied, suffix]
+
+
+## 算分小票：重建内容并滑到当前指标行的左侧
+##   shown       = 需要展示的来源行 [{phase, value, capped, target}]
+##   reveal_cnt  = 显示到第几行（传 shown.size() 表示再追加「合计」行）
+func _rebuild_receipt(metric: String, shown: Array, reveal_cnt: int, true_end: int) -> void:
+	if score_receipt_box == null:
+		return
+	for c in score_receipt_box.get_children():
+		c.queue_free()
+	var col: Color = METRIC_COLORS.get(metric, Color.WHITE)
+	for i in mini(reveal_cnt, shown.size()):
+		var p: Dictionary = shown[i]
+		var hb := HBoxContainer.new()
+		hb.add_theme_constant_override("separation", 8)
+		var nm := _make_label(str(SCORE_PHASE_NAMES.get(str(p["phase"]), str(p["phase"]))), 11,
+				Color(0.68, 0.66, 0.62))
+		nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hb.add_child(nm)
+		var v: int = int(p["value"])
+		var txt: String = "%+d" % v
+		var vc: Color = col
+		if bool(p["capped"]):
+			txt += "(已满)" if v >= 0 else "(见底)"
+			vc = Color(0.62, 0.60, 0.56)
+		hb.add_child(_make_label(txt, 13, vc))
+		score_receipt_box.add_child(hb)
+	if reveal_cnt >= shown.size():
+		var hb2 := HBoxContainer.new()
+		hb2.add_theme_constant_override("separation", 8)
+		var nm2 := _make_label("合计", 13, Color(0.90, 0.86, 0.78))
+		nm2.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		hb2.add_child(nm2)
+		hb2.add_child(_make_label("%+d" % true_end, 15, col))
+		score_receipt_box.add_child(hb2)
+	score_receipt.visible = true
+
+
+## 把小票滑到指标行的左侧（避开右上角的牌堆区域）
+func _place_receipt(row: VBoxContainer) -> void:
+	if score_receipt == null or row == null or not is_instance_valid(row):
+		return
+	var vp := get_viewport().get_visible_rect().size
+	var rg: Rect2 = row.get_global_rect()
+	var target := Vector2(
+		rg.position.x - score_receipt.size.x - 10.0,
+		clampf(rg.get_center().y - score_receipt.size.y * 0.5, 6.0, vp.y - score_receipt.size.y - 6.0))
+	var tw := Motion.tween(score_receipt, "linear", "position")
+	Motion.curve(tw, "power2.out")
+	tw.tween_property(score_receipt, "position", target, 0.12 / METRIC_SPEED)
+
+
+## 卡牌抖动：在**当前位置**上抖（甩牌后牌已经不在 base_pos 了）
+func _play_card_shake(panel: PanelContainer, _amp: float, strength: float = 1.0, duration_scale: float = 1.0) -> void:
+	if impact_feedback != null:
+		impact_feedback.pulse(panel, Color("f3d584"), strength, true, duration_scale)
+
+
+## 卡牌上方弹出「+N」飘字：弹入 → 停留 → 上升淡出
+func _play_delta_float(text: String, color: Color, anchor: Vector2, delay: float) -> void:
+	if score_floats == null:
+		return
+	var l := _make_label(text, 18, color)
+	l.position = anchor + Vector2(-60.0, -14.0)
+	l.custom_minimum_size = Vector2(120.0, 0.0)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	l.pivot_offset = Vector2(60.0, 10.0)
+	l.modulate.a = 0.0
+	l.scale = Vector2(0.6, 0.6)
+	score_floats.add_child(l)
+	var tw := Motion.tween(l, "linear")
+	tw.set_parallel(true)
+	Motion.curve(tw, "back.out")
+	tw.tween_property(l, "scale", Vector2.ONE, 0.10).set_delay(delay)
+	tw.tween_property(l, "modulate:a", 1.0, 0.08).set_delay(delay)
+	Motion.curve(tw.chain(), "sine.in")
+	tw.tween_property(l, "position:y", l.position.y - 26.0, 0.30)
+	tw.parallel().tween_property(l, "modulate:a", 0.0, 0.30)
+
+
+## 唯一的复位出口：成功播完与中途作废都走这里。
+## ⚠ _update_hud() 必须在 _score_animating = false **之后**调，
+##   否则会被它自己的抑制逻辑吞掉，指标条永远停在动画中途的值。
+func _score_anim_cleanup() -> void:
+	if impact_feedback != null: impact_feedback.clear()
+	_score_animating = false
+	for info in card_infos:
+		var panel: PanelContainer = info.get("panel")
+		if not is_instance_valid(panel):
+			continue
+		preload("res://scripts/card_burn.gd").reset(panel)
+		CardFlight.stop(panel)
+		info["queue_flying"] = false
+		info["returning"] = false
+		if info.get("flying", false):
+			Motion.cancel(panel, "score_flight")
+			Motion.cancel(panel, "score_rotation")
+			info["flying"] = false
+			panel.z_index = 0
+			panel.scale = Vector2.ONE
+			# 未选中的牌是被淡出收走的，必须把 alpha 也复位，
+			# 否则中断复位后它们会以全透明状态"复活"
+			panel.modulate.a = 1.0
+			panel.rotation = info.get("theta", 0.0)
+			panel.position = info.get("base_pos", panel.position)
+	if score_layer != null:
+		score_layer.visible = false
+	if score_receipt != null:
+		score_receipt.visible = false
+	if score_floats != null:
+		for c in score_floats.get_children():
+			c.queue_free()
+	_update_hud()
+	_update_3d()
+
+
+func _on_resolve_continue() -> void:
+	var kid := GameState.pop_pending_knowledge()
+	if kid != "":
+		_show_knowledge(kid)
+	else:
+		_advance_to_next()
+
+
+func _show_knowledge(card_id: String) -> void:
+	# 这张卡真的弹到玩家面前了 = 收集到 → 记进跨局的知识卡收藏，主页图鉴里就亮了。
+	# unlock() 自带幂等闸门，重复调不会出事。
+	Knowledge.unlock(card_id)
+	_current_phase = "popup_knowledge"
+	var k: Dictionary = GameState.KNOWLEDGE_CARDS[card_id]
+	var body := _knowledge_detail_text(card_id, true)
+	_show_popup("知识卡 · %s" % k["name"], body, "收下(继续)", _on_resolve_continue, card_id)
+	if card_id == "egg_dixinhu":
+		var reveal := CenterContainer.new()
+		reveal.custom_minimum_size.y = 176
+		reveal.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		popup_body.get_parent().add_child(reveal)
+		popup_body.get_parent().move_child(reveal, 1)
+		_knowledge_egg_reveal = reveal
+		var card := _make_knowledge_card(card_id, true)
+		reveal.add_child(card)
+		card.pivot_offset = Vector2(61, 82.5)
+		card.scale = Vector2(0.65, 0.65)
+		card.rotation = -0.12
+		card.modulate.a = 0.0
+		var arrival := Motion.tween(card, "linear").set_parallel(true)
+		Motion.curve(arrival, "back.out")
+		arrival.tween_property(card, "scale", Vector2.ONE, 0.65)
+		arrival.tween_property(card, "rotation", 0.0, 0.65)
+		arrival.tween_property(card, "modulate:a", 1.0, 0.35)
+
+
+func _advance_to_next() -> void:
+	if GameState.game_over:
+		_show_report(GameState.generate_report())
+	else:
+		GameState.start_new_turn()
+		# start_new_turn 会触发事件信号（有事件回合）。无事件回合不弹窗，
+		# 但知识卡弹窗此时已经关闭，所以直接进入分配阶段即可。
+		# 危机警示是独立弹层，也计入「有弹窗」判断，避免危机弹窗未关就发牌。
+		if not popup_root.visible and not crisis_root.visible:
+			_enter_allocate()
+
+
+func _on_game_end(report: Dictionary) -> void:
+	_stop_deal_sfx()
+	# 中途判负（出牌 / 危机爆发）→ 立刻把失败报告推到玩家面前，
+	# 不让他继续出牌、产生「还能救」的错觉。
+	if _defer_game_over:
+		return      # 回合结算流程：结算反馈展示完，由 _advance_to_next 再出报告
+	if _current_phase == "popup_report":
+		return      # 报告已经开着，别叠层
+	if report.get("is_failure", false):
+		_crisis_queue.clear()
+		crisis_root.visible = false   # 危机警示让位给失败报告，不留残影
+		_banner_override = ""         # 横幅也一起交还给实时态势
+		_show_report(report)
+
+
+func _show_report(r: Dictionary) -> void:
+	_current_phase = "popup_report"
+	_update_turn_budget_label()
+	_clear_save()  # 一局已结束，清掉存档（不能再继续）
+	# 通关成就必须在**这里**判，不能放进 _on_game_end：
+	# 打满回合的通关走的是 _finish_turn → _advance_to_next → _show_report 这条路，
+	# 而 _on_game_end 只处理判负（`if report.is_failure`），通关时它什么都不做；
+	# 何况结算期间 _defer_game_over 还会让它整个提前 return。
+	# _show_report 是两种结局的唯一汇合点，判在这里才不会漏。
+	# 只认「不是判负」，不看分数档位 —— 困难难度能撑满 16 回合本身就是成就。
+	if bool(r.get("victory", false)) and int(r.get("turns_survived", 0)) >= GameState.TOTAL_TURNS and GameState.difficulty == GameState.Difficulty.HARD:
+		Achievements.try_unlock("hard_clear")
+	# 「廉政先锋」：通关，且全程平均每回合花费不到门槛。
+	# 用 total_spent / 总回合数 这个**均值**口径，而不是"每一回合都得少花"——
+	# 后者太苛刻：玩家偶尔砸一张大牌救火就会被判出局，不给人留余地。
+	if bool(r.get("victory", false)) \
+			and int(r.get("turns_survived", 0)) >= GameState.TOTAL_TURNS \
+			and float(GameState.total_spent) / float(GameState.TOTAL_TURNS) <= float(Achievements.THRIFTY_SPEND_PER_TURN):
+		Achievements.try_unlock("thrifty")
+	var reward: Dictionary = Talents.claim_victory_report(r)
+	var body := ""
+	var title := "四年 · 生态报告"
+	if bool(r.get("victory", false)) and int(r.get("turns_survived", 0)) < GameState.TOTAL_TURNS:
+		title = "提前胜利 · 生态报告"
+	if r.get("is_failure", false):
+		title = "被撤换 · 修复失败"
+		body += "[color=#ff7060][b]第 %d 回合，%s[/b][/color]\n\n" % [
+			r.get("turns_survived", 0), r.get("failure_reason", "生态崩溃")]
+		# 死因：点名是哪个指标先崩的、崩到多少、线在哪 —— 玩家才知道自己输在哪
+		var fm: String = str(r.get("failure_metric", ""))
+		if fm != "":
+			var fname: String = str(r.get("failure_metric_name", fm))
+			var fval: int = int(r.get("failure_value", GameState.metrics.get(fm, 0)))
+			var fthr: int = int(r.get("failure_threshold", GameState.failure_threshold_for(fm)))
+			body += "[b]失败原因：[/b]%s 跌至 [color=#ff9090]%d[/color]（生态红线 %d）
+" % [fname, fval, fthr]
+		if GameState.last_crisis_name != "":
+			body += "[color=#c08080]本回合危机：%s[/color]\n" % GameState.last_crisis_name
+		body += "你的修复工作被迫中止。请记住，你的每一个举措，都会影响到这一方水土的每一个变化
+
+"
+	body += "[b]生态维度[/b](%s)\n" % r["eco"]["grade"]
+	for n in r["eco"]["notes"]:
+		body += "  · %s\n" % n
+	body += "\n[b]社会维度[/b](%s)\n" % r["social"]["grade"]
+	for n in r["social"]["notes"]:
+		body += "  · %s\n" % n
+	body += "\n[b]管理维度[/b](%s)\n" % r["manage"]["grade"]
+	for n in r["manage"]["notes"]:
+		body += "  · %s\n" % n
+	body += "\n[b]知识卡收集[/b]：%d / %d　[b]科研点[/b]：%d\n" % [r["knowledge_count"], r["total_knowledge"], r["research_points"]]
+	body += "[color=#8a8a8a]本局种子：%d[/color]\n" % r.get("seed", 0)
+	if reward.save_error:
+		body += "[color=#ff9090]通关奖励未能保存，请检查本地存档目录。[/color]\n"
+	elif reward.duplicate:
+		body += "[color=#9dd5bd]本局通关奖励已领取。[/color]\n"
+	elif reward.mastery:
+		body += "[color=#ffd060][b]噩梦通关奖励：全部天赋满级，解除分配上限！[/b][/color]\n"
+	elif int(reward.amount) > 0:
+		body += "[color=#ffd060]通关获得灵感：+%d　(当前 %d)[/color]\n" % [reward.amount, Talents.inspiration]
+	else:
+		body += "[color=#9dd5bd]胜利通关(含提前胜利)可获得灵感，本次未获得。[/color]\n"
+	_show_popup(title, body, "返回主菜单", _restart)
+
+
+func _restart() -> void:
+	_playing = false
+	_current_event = ""
+	_banner_override = ""
+	# 四个难度各自第一次走完一局：先放结尾短片（播完自己回主菜单）；看过或没素材就直接回
+	if _try_play_ending():
+		return
+	# 回到主菜单，让玩家可重新输入种子（留空则随机）
+	_show_menu()
+
+
+# ==================== 通用弹窗 ====================
+func _layout_knowledge_popup() -> void:
+	if popup_photo_frame == null or not popup_photo_frame.visible: return
+	var viewport := get_viewport().get_visible_rect().size
+	var width := floorf(minf(800.0, viewport.x - 48.0))
+	var inner_width := width - UiSkin.PANEL_CONTENT * 2.0
+	var stacked := inner_width < 620.0 or get_window().size.x < 1000
+	var photo_size := 224.0 if stacked else 256.0
+	photo_size = minf(photo_size, inner_width)
+	popup_panel.custom_minimum_size = Vector2(width, 0)
+	popup_content.vertical = stacked
+	popup_photo_frame.custom_minimum_size = Vector2.ONE * photo_size
+	popup_photo_frame.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	popup_photo_frame.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	var text_width := inner_width if stacked else inner_width - photo_size - 20.0
+	# Leave space for wrapped headings and the always-visible collection button.
+	var available := viewport.y - 190.0 - (photo_size + 20.0 if stacked else 0.0)
+	# Shape at the final column width, then use only the space the text needs.
+	popup_body.size.x = text_width
+	var natural_height := float(popup_body.get_content_height())
+	var desired_height := maxf(128.0 if stacked else photo_size, natural_height)
+	var text_height := minf(desired_height, maxf(120.0, available))
+	popup_body.custom_minimum_size = Vector2(text_width, text_height)
+	popup_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	popup_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# Container minimums can shrink between a wide and a stacked popup.
+	popup_panel.reset_size()
+	popup_panel.pivot_offset = popup_panel.size * 0.5
+
+
+func _configure_knowledge_popup(card_id: String) -> void:
+	_knowledge_popup_card_id = card_id
+	popup_photo.texture = _knowledge_photo(card_id) if not card_id.is_empty() else null
+	popup_photo_frame.visible = popup_photo.texture != null
+	popup_body.scroll_to_line(0)
+	if popup_photo_frame.visible:
+		popup_title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		popup_body.fit_content = false
+		popup_body.scroll_active = true
+		_layout_knowledge_popup()
+	else:
+		popup_content.vertical = true
+		popup_panel.custom_minimum_size = Vector2(600, 0)
+		popup_title.autowrap_mode = TextServer.AUTOWRAP_OFF
+		popup_body.fit_content = true
+		popup_body.custom_minimum_size = Vector2(540, 0)
+		popup_body.size_flags_horizontal = Control.SIZE_FILL
+		popup_body.size_flags_vertical = Control.SIZE_FILL
+		popup_panel.reset_size()
+
+
+func _show_popup(title: String, body: String, button_text: String, on_continue: Callable, knowledge_id: String = "") -> void:
+	if is_instance_valid(_knowledge_egg_reveal):
+		_knowledge_egg_reveal.get_parent().remove_child(_knowledge_egg_reveal)
+		_knowledge_egg_reveal.queue_free()
+		_knowledge_egg_reveal = null
+	if _popup_reveal and _popup_reveal.is_valid(): _popup_reveal.kill()
+	popup_title.text = title
+	popup_body.text = body
+	_configure_knowledge_popup(knowledge_id)
+	popup_button.text = button_text
+	_popup_continue = on_continue
+	popup_root.visible = true
+	# 面板 pivot 需要等布局完成后再设，否则用旧尺寸缩放会偏移
+	popup_panel.pivot_offset = popup_panel.size * 0.5
+	# 弹窗淡入 + 面板轻微弹入（玩家等待中的反馈，用稍长时长更从容）
+	popup_root.modulate.a = 0.0
+	popup_panel.scale = Vector2(0.94, 0.94)
+	var tw := Motion.tween(popup_root, "linear", "opacity")
+	Motion.curve(tw, "power2.out")
+	tw.tween_property(popup_root, "modulate:a", 1.0, 0.18)
+	var tw2 := Motion.tween(popup_panel, "linear", "scale")
+	Motion.curve(tw2, "back.out")
+	tw2.tween_property(popup_panel, "scale", Vector2.ONE, 0.24)
+	# 正文打字机效果：逐字从左到右、从上到下依次打出
+	popup_body.visible_ratio = 1.0
+	popup_body.visible_characters = 0
+	var total := popup_body.get_total_character_count()
+	var reveal_time: float = clampf(total * 0.016, 0.3, 2.5)
+	var tw3 := Motion.tween(popup_body, "linear", "text_reveal")
+	_popup_reveal = tw3
+	Motion.curve(tw3, "none")
+	tw3.tween_property(popup_body, "visible_characters", total, reveal_time).set_delay(0.1)
+
+
+func _on_popup_button() -> void:
+	# 若正文还在逐字打字中，第一次点击先把文字补全（避免误关）
+	if popup_body.visible_characters >= 0 and popup_body.visible_characters < popup_body.get_total_character_count():
+		if _popup_reveal and _popup_reveal.is_valid(): _popup_reveal.kill()
+		popup_body.visible_characters = -1
+		return
+	popup_root.visible = false
+	var cb := _popup_continue
+	_popup_continue = Callable()
+	if cb.is_valid():
+		cb.call()
+
+
+# ==================== 控件工厂 ====================
+## 大标题用的点阵字体（Minecraft 大标题那种块状字）。缺字回落到界面字体，不会出豆腐块。
+func _big_title_font() -> FontFile:
+	var f: FontFile = load("res://fonts/fusion-pixel-12px-monospaced-zh_hans.ttf")
+	if f == null:
+		return null
+	# 关抗锯齿 + 关次像素定位，点阵字才锐利
+	f.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+	f.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+	# ⚠ 不能把界面字体挂进来：它的 fallbacks 里已经有这个像素字体，互相指就是环
+	# （Godot 报 "Cyclic font fallback."）。标题需要的字它自己都有，这里只兜一层宋体。
+	var extra: FontFile = load("res://fonts/RenOuFangSong-16.ttf")
+	f.fallbacks = [extra] if extra != null else []
+	return f
+
+
+func _make_label(text: String, size: int, color: Color) -> Label:
+	var l := Label.new()
+	l.text = text
+	l.add_theme_font_size_override("font_size", _snap_px(size))
+	l.add_theme_color_override("font_color", color)
+	return l
+
+
+## danger = true 时换成暗红木纹 + 浅红字：危险操作（清空存档）要一眼看出来
+func _make_button(text: String, cb: Callable, size: int, danger: bool = false) -> Button:
+	var b := Button.new()
+	b.text = text
+	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	b.add_theme_font_size_override("font_size", _snap_px(size))
+	VisualTheme.style_button(b, danger)
+	b.mouse_entered.connect(func(): VisualTheme.button_feedback(b, true))
+	b.mouse_exited.connect(func(): VisualTheme.button_feedback(b, false))
+	b.focus_entered.connect(func(): VisualTheme.button_feedback(b, true))
+	b.focus_exited.connect(func(): VisualTheme.button_feedback(b, false))
+	b.pressed.connect(cb)
+	return b
+
+
+func _wood_button(bg: Color, border: Color) -> StyleBoxFlat:
+	return VisualTheme.box(bg, border, 7)
+
+
+func _panel_style(p: PanelContainer, color: Color) -> void:
+	# 16bit 面板：统一 #0B2B4A 底 + 奶白 2px 描边 + 直角（配色取自美术参考图「框.png」）。
+	# 传进来偏红的面板（危机 / 清空存档）继续走暖红，危险操作要一眼分得出来。
+	var danger := color.r > color.g * 1.8
+	p.add_theme_stylebox_override("panel", UiSkin.panel(danger))
+
+
+## 左侧/右侧信息面板滑出屏幕（结算后）或滑回（下一回合开始）
+func _slide_side_panels(out: bool) -> void:
+	# 收出屏幕后额外留的余量（像素）。必须让整块面板离开可视区。
+	const GAP := 24.0
+	if left_panel == null or right_panel == null:
+		return
+	var tw := Motion.tween(self, "linear")
+	tw.set_parallel(true)
+	Motion.curve(tw, "power2.inOut")
+	if out:
+		var lw := left_panel.offset_right - left_panel.offset_left
+		var rw := right_panel.offset_right - right_panel.offset_left
+		# 左面板锚在左缘：offset 取负值 = 移到屏幕左侧之外
+		tw.tween_property(left_panel, "offset_left", -lw - GAP, 0.35)
+		tw.tween_property(left_panel, "offset_right", -GAP, 0.35)
+		# 右面板锚在**右缘**（anchor_left = anchor_right = 1.0，x = 屏宽 + offset）：
+		# offset 必须取**正值**才表示移出屏幕右侧。
+		# ⚠ 原实现照抄了左面板的负号（-6 / rw-6），结果是面板左缘停在「屏宽-6」处，
+		#   屏幕上残留 6px 的一条边 —— 方向反了，等于往屏幕里推。
+		tw.tween_property(right_panel, "offset_left", GAP, 0.35)
+		tw.tween_property(right_panel, "offset_right", rw + GAP, 0.35)
+	else:
+		tw.tween_property(left_panel, "offset_left", 18, 0.35)
+		tw.tween_property(left_panel, "offset_right", 222, 0.35)
+		tw.tween_property(right_panel, "offset_left", -210, 0.35)
+		tw.tween_property(right_panel, "offset_right", -18, 0.35)
+
+
+# ==================== 像素图标 ====================
+## 从字符网格生成像素图标纹理（'#'=描边, 'X'=主色, 'o'=高光, '.'=透明）
+func _pixel_icon(grid: String, main: Color, dark: Color, light: Color) -> ImageTexture:
+	return ImageTexture.create_from_image(_grid_image(grid, main, dark, light))
+
+
+## 把网格字符串解析成 Image（# 深色 / X 主色 / o 高亮）
+func _grid_image(grid: String, main: Color, dark: Color, light: Color) -> Image:
+	var rows: Array = []
+	for r in grid.split("\n"):
+		var line: String = (r as String).strip_edges()
+		if line != "":
+			rows.append(line)
+	var h := rows.size()
+	var w := (rows[0] as String).length()
+	var img := Image.create(w, h, false, Image.FORMAT_RGBA8)
+	for y in h:
+		var line: String = rows[y]
+		for x in w:
+			match line[x]:
+				"#": img.set_pixel(x, y, dark)
+				"X": img.set_pixel(x, y, main)
+				"o": img.set_pixel(x, y, light)
+				_: img.set_pixel(x, y, Color(0, 0, 0, 0))
+	return img
+
+
+## 生成放大到约 px 宽的像素图标**纹理**（最近邻，保持锐利）。
+## 与 _make_icon 的区别：那个返回 TextureRect 控件，用于往容器里塞；
+## 这个返回 Texture，因为 Button.icon 和运行时换图要的是纹理本身。
+func _pixel_icon_sized(grid: String, main_color: Color, px: int) -> ImageTexture:
+	var img := _grid_image(grid, main_color, main_color.darkened(0.38), main_color.lightened(0.32))
+	var scale := maxi(1, int(round(float(px) / maxf(1.0, float(img.get_width())))))
+	img.resize(img.get_width() * scale, img.get_height() * scale, Image.INTERPOLATE_NEAREST)
+	return ImageTexture.create_from_image(img)
+
+
+## 生成指定显示尺寸的像素图标控件（最近邻放大保持锐利）
+func _make_icon(grid: String, main: Color, px: int) -> TextureRect:
+	var tr := TextureRect.new()
+	tr.texture = _pixel_icon(grid, main, main.darkened(0.38), main.lightened(0.32))
+	tr.custom_minimum_size = Vector2(px, px)
+	tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	tr.stretch_mode = TextureRect.STRETCH_SCALE
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	return tr
+
+
+## 美术交付的像素图标控件：按素材原始像素大小 1:1 显示。
+## ⚠ 不要用 _make_icon 那套（它是把 8×8 网格整数放大 + 染色），
+##   美术图有自己的配色，染色会把它染花；拉伸也会糊掉像素。
+## target_h > 0 时按目标高度等比放大（美术图外面有一圈很淡的半透明边，
+## 包围盒比看得见的实体大，所以「原尺寸 1:1」实际会显示得很小 ——
+## 需要跟旁边的文字对齐高度时，用这个参数按可见尺寸给高度）。
+func _make_art_icon(tex: Texture2D, target_h: float = 0.0) -> TextureRect:
+	var w := float(tex.get_width())
+	var h := float(tex.get_height())
+	if target_h > 0.0:
+		w = roundf(w * target_h / h)
+		h = target_h
+	var tr := TextureRect.new()
+	tr.texture = tex
+	tr.custom_minimum_size = Vector2(w, h)
+	tr.texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
+	# ⚠ 必须用 SCALE：KEEP_CENTERED 只是把原尺寸的图居中摆放，不会真的放大
+	tr.stretch_mode = TextureRect.STRETCH_SCALE
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	return tr
+
+
+## 资金栏的金币 / 科研点图标接上六项指标那套反馈（悬停放大 + 点击戳一下）。
+## 倍数按图标实际尺寸给：指标图标只有 14px 可以放到 1.35，这两个更大，得收着。
+func _attach_poke(icon: TextureRect, poke_hover_target: float) -> void:
+	icon.set_script(preload("res://scripts/metric_icon_effect.gd"))
+	icon.effects_owner = self
+	icon.hover_target = poke_hover_target
+
+
+## 科研点是唯一「看着是个数字、其实换能力」的累计值，悬停要说清它换到什么。
+## 阈值全部取自 GameState，改常量时提示跟着走。
+func _research_tooltip() -> String:
+	return ("科研点是累计值，用来换监测能力，不会消耗。\n"
+			+ "· 打「生态监测与科研」按档位得 1 / 2 / 3 点\n"
+			+ "· 回合末结转超出 %d 万上限的部分，每 10 万转 1 点\n"
+			+ "· 累计满 %d 点开启深预警：危机预警从提前 1 回合延长到提前 2 回合\n"
+			+ "· 累计 20 点以上，结算报告会记一条「长期数据库建立」") % [
+				GameState.MAX_CARRY, GameState.DEEP_WARN_RESEARCH]
+
+
+## 成就图标控件：优先用美术交付的 PNG（LIST 里带 "tex" 的那几条），
+## 没有交付图的（无交付贴图的成就）回退到像素网格现画。
+## ⚠ 两条路的缩放规则不一样：美术图是平滑插画，必须线性过滤 + 未解锁整体压暗；
+##   网格是像素画，必须最近邻 + 换主色。混用会把其中一种弄花。
+func _make_achievement_icon(a: Dictionary, got: bool, px: int) -> TextureRect:
+	var tex: Texture2D = null
+	if a.has("tex"):
+		tex = _achievement_art(a) if got else _achievement_art_locked(a)
+	var art := tex != null
+	if not art:
+		# 没有交付图的那几条（无交付贴图的成就）：继续用像素网格现画
+		var tint := ACH_GOLD if got else ACH_LOCKED
+		tex = _pixel_icon(str(a["icon"]), tint, tint.darkened(0.38), tint.lightened(0.32))
+	var tr := TextureRect.new()
+	tr.texture = tex
+	# ⚠ 统一外框 + 等比居中，**不要**用 _make_art_icon 那套「按高度缩放、宽度自适应」：
+	#   四张美术图的宽高比不一样（裁完 42~53px 宽），宽度一行一个样，右边的名字就会
+	#   一行一个起点（错位）。同一列宽之后，图标在盒子里等比居中，高度也一眼齐平。
+	tr.custom_minimum_size = Vector2(ACH_ICON_BOX_WIDTH, float(px))
+	tr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR if art else CanvasItem.TEXTURE_FILTER_NEAREST
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	tr.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	return tr
+
+
+## 未解锁的美术图标 = 灰牌：裁掉留白 → 去色 → 压暗。
+## ⚠ 不能只乘一层灰色 modulate：彩色图和金色的解锁图放一起，一眼分不出解锁与否。
+func _achievement_art_locked(a: Dictionary) -> Texture2D:
+	var tex: Texture2D = _achievement_art(a)
+	if tex == null:
+		return null
+	if _ach_art_grey.has(tex):
+		return _ach_art_grey[tex]
+	var result: Texture2D = tex
+	var src := tex.get_image()
+	if src != null:
+		var region := _alpha_region(tex, 0.05)
+		var sub: Image = src
+		if region.size.x >= 1.0 and region.size.y >= 1.0:
+			sub = src.get_region(Rect2i(region))
+		var grey := Image.create(sub.get_width(), sub.get_height(), false, Image.FORMAT_RGBA8)
+		for y in sub.get_height():
+			for x in sub.get_width():
+				var c := sub.get_pixel(x, y)
+				var lum := c.r * 0.299 + c.g * 0.587 + c.b * 0.114
+				# 0.34 起底、上限约 0.80：暗到一眼看出没解锁，又还认得出图案
+				var v := clampf(0.34 + lum * 0.46, 0.0, 1.0)
+				grey.set_pixel(x, y, Color(v, v, v, c.a))
+		result = ImageTexture.create_from_image(grey)
+	_ach_art_grey[tex] = result
+	return result
+
+
+## 主菜单入口的小图标：美术图裁掉透明留白后，等比放进 box×box 的外框里。
+## ⚠ 必须等比居中 —— 勋章是 0.66、卡片是 0.86 的宽高比，按框拉伸会压扁；
+##   也必须线性过滤：这两张是平滑绘制的插画，不是像素网格。
+func _make_menu_entry_icon(tex: Texture2D, box: float) -> TextureRect:
+	var tr := TextureRect.new()
+	tr.texture = _trim_alpha_margin(tex)
+	tr.custom_minimum_size = Vector2(box, box)
+	tr.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	return tr
+
+
+## 取某条成就的美术图标纹理；没有交付图（或资源缺失）时返回 null。
+## 返回前先裁掉四周的透明留白（见 _trim_alpha_margin），否则同一排里
+## 它看着会比旁边像素网格画的图标小一圈。
+func _achievement_art(a: Dictionary) -> Texture2D:
+	if not a.has("tex"):
+		return null
+	return _trim_alpha_margin(a["tex"] as Texture2D)
+
+
+## 裁掉素材四周的透明留白：返回 AtlasTexture（不改磁盘上的原图），
+## 实体铺满整个图标盒，视觉大小才和像素网格图标对得上。结果按纹理缓存。
+func _trim_alpha_margin(tex: Texture2D) -> Texture2D:
+	if tex == null:
+		return null
+	if _ach_art_trimmed.has(tex):
+		return _ach_art_trimmed[tex]
+	var full := Vector2(tex.get_width(), tex.get_height())
+	var region := _alpha_region(tex, 0.05)
+	var result: Texture2D = tex
+	if region.size.x > 0.0 and region.size.y > 0.0 and region.size != full:
+		var at := AtlasTexture.new()
+		at.atlas = tex
+		at.region = region
+		result = at
+	_ach_art_trimmed[tex] = result
+	return result
+
+
+## 不透明像素的包围盒。阈值 0.05 是为了吃掉美术图外圈那层几乎看不见的抗锯齿边。
+## 图读不出来或整张全透明时返回空矩形，调用方退回用原图。
+func _alpha_region(tex: Texture2D, threshold: float) -> Rect2:
+	var img := tex.get_image()
+	if img == null:
+		return Rect2()
+	var w := img.get_width()
+	var h := img.get_height()
+	var min_x := w
+	var min_y := h
+	var max_x := -1
+	var max_y := -1
+	for y in h:
+		for x in w:
+			if img.get_pixel(x, y).a > threshold:
+				min_x = mini(min_x, x)
+				max_x = maxi(max_x, x)
+				min_y = mini(min_y, y)
+				max_y = maxi(max_y, y)
+	if max_x < 0:
+		return Rect2()
+	return Rect2(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
+
+
+## 旧的程序化图标网格（金额/科研点/指标都改用美术图后，这里只作历史备份，没人再调）
+## 各数值/指标对应的像素图标网格
+func _icon_grid_for(kind: String) -> String:
+	match kind:
+		"coin":
+			return """..####..
+.#XXXX#.
+#XooXXX#
+#XooXXX#
+#XXXXXX#
+#XXXXXX#
+.#XXXX#.
+..####.."""
+		"water_level":
+			return """...##...
+..#XX#..
+.#XooX#.
+.#XXXX#.
+.#XXXX#.
+..#XX#..
+...##...
+........"""
+		"vegetation":
+			return """....#...
+....##..
+..###X#.
+.###XX#.
+.###XX#.
+..###...
+....#...
+........"""
+		"water_quality":
+			return """...##...
+...##...
+..#XX#..
+.#XXXX#.
+#XXXXXX#
+#XXXXXX#
+.#XXXX#.
+..####.."""
+		"fish":
+			return """........
+..##....
+.####..#
+#######.
+.####..#
+..##....
+........
+........"""
+		"birds":
+			return """........
+..##....
+.#####.#
+#######.
+.####...
+..##....
+........
+........"""
+		"community":
+			return """........
+.##..##.
+#XX##XX#
+#XXXXXX#
+#XXXXXX#
+.#XXXX#.
+..####..
+...##..."""
+		"research":
+			return """........
+.#######
+.#######
+.#######
+.#.#.#.#
+.#######
+........
+........"""
+	return ""
+
+
+# ==================== 像素字体 ====================
+## 加载界面字体（长坂点宋 16 / ChangBanDianSong-16-SC）并设为全局默认字体。
+## 缺字（例如 ▶）按顺序回落到项目里原有的像素字体，保证不会出现豆腐块。
+func _setup_pixel_font() -> void:
+	# 用 load() 读导入后的 FontFile，导出包（.pck）里也能正确加载
+	var ui_font: FontFile = load("res://fonts/ChangBanDianSong-16-SC.ttf")
+	if ui_font == null:
+		return
+	var fallbacks: Array[Font] = []
+	for path in ["res://fonts/fusion-pixel-12px-monospaced-zh_hans.ttf",
+			"res://fonts/fusion-pixel-12px-monospaced-latin.ttf",
+			"res://fonts/RenOuFangSong-16.ttf"]:
+		var f: FontFile = load(path)
+		if f != null:
+			fallbacks.append(f)
+	ui_font.fallbacks = fallbacks
+	# 关抗锯齿 + 关次像素定位，点阵字才不发虚
+	ui_font.antialiasing = TextServer.FONT_ANTIALIASING_NONE
+	ui_font.subpixel_positioning = TextServer.SUBPIXEL_POSITIONING_DISABLED
+	ThemeDB.fallback_font = ui_font
+	var theme := Theme.new()
+	theme.default_font = ui_font
+	theme.default_font_size = 12
+	# 粗体（[b]）必须显式绑成正文字体本身。
+	# 不写这三行的话，RichTextLabel 会掉回引擎默认主题的 bold：那是一份
+	# FontVariation(base=引擎自带无衬线, variation_embolden=1.2)。叠加在这套点阵/像素字体上，
+	# 1px 的笔画被横向撑胖、字腔糊死 —— 玩测反馈原话「粗体字导致看不清文本」。
+	# 现在 [b] 与正文同版面（不加粗），要强调的地方改用颜色。
+	for rtl_font in ["bold_font", "italics_font", "bold_italics_font"]:
+		theme.set_font(rtl_font, "RichTextLabel", ui_font)
+	theme.set_stylebox("panel", "TooltipPanel", UiSkin.panel())
+	theme.set_color("font_color", "TooltipLabel", VisualTheme.PAPER)
+	theme.set_font_size("font_size", "TooltipLabel", 12)
+	for state in ["normal", "focus", "read_only"]:
+		theme.set_stylebox(state, "LineEdit", UiSkin.text_box(8.0))
+	theme.set_color("font_color", "LineEdit", VisualTheme.PAPER)
+	get_tree().root.theme = theme
+
+
+## 把字号吸附到像素字体的原生尺寸（12px 的整数倍），避免缩放发虚
+func _snap_px(s: int) -> int:
+	return maxi(12, int(round(s / 12.0)) * 12)

@@ -1,0 +1,20 @@
+# Godot 4+ 缓存
+.godot/
+/android/
+
+# 编辑器本地配置
+.claude/
+
+# 导出包与录制中间文件（体积大，不入库）
+build/
+*.avi
+*.tmp
+
+# 本地录制用的引擎本体（180 MB，自己放）
+godot-record.exe
+
+# 开发记录截图（103 MB，演示库不带）
+docs/screenshots/
+
+# 演示输出（成片 mp4 留在本地）
+outputs/

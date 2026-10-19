@@ -1,0 +1,52 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="鄱阳归翎-生态修复手记"
+run/main_scene="res://scenes/main.tscn"
+config/features=PackedStringArray("4.7", "GL Compatibility")
+run/max_fps=120
+config/icon="res://icon.png"
+config/use_custom_user_dir.windows=true
+config/custom_user_dir_name.windows="Godot/app_userdata/保卫鄱阳湖"
+
+[autoload]
+
+GameState="*res://scripts/game_state.gd"
+Talents="*res://scripts/talents.gd"
+Achievements="*res://scripts/achievements.gd"
+Knowledge="*res://scripts/knowledge.gd"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/window_width_override=1600
+window/size/window_height_override=900
+window/stretch/mode="canvas_items"
+window/stretch/aspect="expand"
+window/size/min_width=960
+window/size/min_height=540
+
+[dotnet]
+
+project/assembly_name="鄱阳归翎-生态修复手记"
+
+[physics]
+
+3d/physics_engine="Jolt Physics"
+
+[rendering]
+
+rendering_device/driver.windows="d3d12"
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/vram_compression/import_etc2_astc=true
