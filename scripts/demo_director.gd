@@ -373,9 +373,9 @@ func _run() -> void:
 	await _start_part()
 	await _board_part()
 	await _first_turn_part()
+	await _deck_part()
 	await _more_turns_part()
-	await _tech_part()
-	await _ending_part()
+	await _board_close_part()
 	await _outro_part()
 
 func _menu_part() -> void:
@@ -466,7 +466,7 @@ func _first_turn_part() -> void:
 
 func _more_turns_part() -> void:
 	print("[demo] part _more_turns_part t=", Time.get_ticks_msec()/1000.0, " frame=", Engine.get_process_frames())
-	await _sync_to(101.0)
+	await _sync_to(133.0)
 	await _say("警报响起，并不意味着一切已经来不及。危机先预警，再在下一回合爆发。", 4.2)
 	main.score_speed = 3.0
 	for round_i in 3:
@@ -489,14 +489,20 @@ func _more_turns_part() -> void:
 	main.score_speed = 1.0
 	_mute_sub()
 
-func _tech_part() -> void:
-	print("[demo] part _tech_part t=", Time.get_ticks_msec()/1000.0, " frame=", Engine.get_process_frames())
-	await _sync_to(130.0)
+## 牌库与卡牌厚度。2026-10-19 第二次调整：从原来的「技术段」整体前移到
+## 「知识卡弹窗」之后、「危机快剪」之前，开完这里就关掉牌库回到局内。
+func _deck_part() -> void:
+	print("[demo] part _deck_part t=", Time.get_ticks_msec()/1000.0, " frame=", Engine.get_process_frames())
+	await _sync_to(101.0)
 	await _say("五十五张行动卡，四十一张知识卡。", 3.0)
+	# 上一段如果残留了「牌库已开」的状态，_open_deck_viewer 会直接 return，画面就不换。
+	if main._deck_open:
+		main._close_deck_viewer()
+		await _wait(0.3)
 	main._open_deck_viewer()
-	await _wait(2.0)
+	await _wait(0.6)
+	await _wait(1.4)
 	await _say("牌库、手牌与知识卡，共用一套卡面绘制。数量增加，视觉依然统一，每一张都清晰就位。", 5.6)
-	await _sync_to(145.0)
 	var view: Control = null
 	if main.deck_viewer_grid.get_child_count() > 1:
 		view = main.deck_viewer_grid.get_child(1)
@@ -519,35 +525,21 @@ func _tech_part() -> void:
 	await _wait(0.6)
 	main._close_deck_viewer()
 	_sub_at_top(true)
-	await _sync_to(160.0)
+	await _wait(0.4)
+	_mute_sub()
+
+## 局内沙盘与手牌同框。原来挂在技术段末尾，现在单独成段，接在危机快剪之后，
+## 说完就硬接收尾卡——中间那段只有通关才播的短片按用户要求去掉了。
+func _board_close_part() -> void:
+	print("[demo] part _board_close_part t=", Time.get_ticks_msec()/1000.0, " frame=", Engine.get_process_frames())
+	await _sync_to(170.0)
+	_sub_at_top(true)
 	await _say("三维沙盘，二维卡牌。同一帧画面里，行动与结果相遇。", 5.0)
 	_mute_sub()
 	await _wait(0.3)
 
-func _ending_part() -> void:
-	print("[demo] part _ending_part t=", Time.get_ticks_msec()/1000.0, " frame=", Engine.get_process_frames())
-	await _sync_to(167.0)
-	await _say("现在，把目光从牌桌移向湖面。", 2.4)
-	main._play_ending()
-	await _wait(0.8)
-	if main.ending_player != null:
-		main.ending_player.stream_position = 4.0
-	await _say("游戏画面与实拍交替，这一局的选择，也有了现实中的回声。", 4.2)
-	await _wait(5.4)
-	await _say("你努力守护的，是候鸟下一次归来时，依然可以停留的地方。", 4.6)
-	await _wait(1.0)
-	# 不调 _finish_ending()：它会顺手 _show_menu()，短片结束到收尾卡之间
-	# 会露出主菜单闪一下。这里只把视频层收掉，画面直接进收尾卡。
-	if main.ending_player != null:
-		main.ending_player.stop()
-	if main.ending_layer != null:
-		main.ending_layer.visible = false
-	main._ending_playing = false
-	await _wait(0.8)
-	_mute_sub()
-
 func _outro_part() -> void:
 	print("[demo] part _outro_part t=", Time.get_ticks_msec()/1000.0, " frame=", Engine.get_process_frames())
-	await _sync_to(185.0)
+	await _sync_to(176.0)
 	await _card("鄱阳归翎 · 生态修复手记", "候鸟即将归来。站长，轮到你出牌了。鄱阳归翎，等待你的选择。", 3.4, true)
 	await _card("谢谢观看", "16 回合 / 四季 / 6 项指标 / 55 张行动卡 / 41 张知识卡", 2.4, true)
